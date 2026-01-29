@@ -24,18 +24,30 @@ export default function FinancialStatementsView({ ticker }: { ticker: string }) 
   const [year, setYear] = useState<number>(new Date().getFullYear() - 1);
   const [data, setData] = useState<FinancialData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"IS" | "BS" | "CF">("IS");
 
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
+      setError(null);
       try {
-        const res = await fetch(`/api/financials/3st?ticker=${ticker}&year=${year}`);
-        if (!res.ok) throw new Error("Failed to fetch data");
-        const json = await res.json();
+        const res = await fetch(
+          `/api/financials/3st?ticker=${encodeURIComponent(ticker)}&year=${year}`
+        );
+        if (!res.ok) {
+          const text = await res.text();
+          const message = text
+            ? `${res.status} ${res.statusText}: ${text}`
+            : `${res.status} ${res.statusText}`;
+          throw new Error(message);
+        }
+        const json: FinancialData = await res.json();
         setData(json);
       } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
         console.error("Error fetching financial data:", error);
+        setError(message);
         setData(null);
       } finally {
         setLoading(false);
@@ -99,6 +111,11 @@ export default function FinancialStatementsView({ ticker }: { ticker: string }) 
           <div className="flex flex-col items-center justify-center h-[400px] text-muted-foreground">
             <Loader2 className="w-8 h-8 animate-spin mb-2" />
             <p>Loading financial data...</p>
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center h-[400px] text-muted-foreground text-center px-6">
+            <p className="font-medium">Failed to load financial data.</p>
+            <p className="text-sm mt-1 break-all">{error}</p>
           </div>
         ) : !data || data[activeTab].length === 0 ? (
           <div className="flex flex-col items-center justify-center h-[400px] text-muted-foreground">
