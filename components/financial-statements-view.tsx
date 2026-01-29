@@ -82,8 +82,15 @@ export default function FinancialStatementsView({ ticker }: { ticker: string }) 
       });
 
       if (!res.ok) {
-        const json = await res.json();
-        throw new Error(json.error || "Ingestion failed");
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const json = await res.json();
+          throw new Error(json.error || "Ingestion failed");
+        } else {
+          // HTML 에러 페이지(404, 500)가 반환된 경우
+          const text = await res.text();
+          throw new Error(`Server Error (${res.status}): ${text.slice(0, 100)}...`);
+        }
       }
 
       // 수집 성공 후 데이터 재조회 (새로고침 효과)
