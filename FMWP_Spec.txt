@@ -1,0 +1,759 @@
+# Project FMWP(Financial Modeling Web Platform)
+Master Program Specification
+Version: v1 (Spec / Engineering Super-Detail)
+Last Updated: 2026-01-29,12:32 (KST / Asia-Seoul)
+
+───────────────────────────────────────────────────────────────────────────────
+0. 프로젝트 비전 / 철학
+───────────────────────────────────────────────────────────────────────────────
+[프로젝트 목표]
+- 단순 차트·리포트가 아닌, IB/PE 실무자가 “감사 가능(auditable)”하고 “재현 가능(reproducible)”하다고 인정할 수준의
+  Raw Data 보존 + 검증된 계산 엔진 + 고성능 시뮬레이션 UI를 제공한다.
+
+[원칙: Single Source of Truth]
+- 외부 원천(OpenDART, KRX 등)에서 가져온 데이터를 ‘단 1%도 변형 없이’ 보존.
+- UI/모델링 결과는 Raw Data를 비추는 거울이며, 가치의 중심은 “데이터 레이크(데이터 무결성)”에 있다.
+
+[설계 철학 3대 축]
+1) 불변성(Immutable): Raw 레이어는 Insert-Only. 원본은 절대 Update/Overwrite 금지.
+2) 증명 가능(Provable Integrity): SHA-256 해시 + 감사 로그로 원본 변조 여부를 수학적으로 증명.
+3) 실무 적합(Production-grade): Rate Limit, 장애 복구, DLQ 격리, Cold Storage 아카이빙, Observability까지 포함.
+
+───────────────────────────────────────────────────────────────────────────────
+1. 전체 시스템 개요 (High-Level Architecture)
+───────────────────────────────────────────────────────────────────────────────
+[논리 계층]
+- L1 Raw Layer (Data Lake / Source-of-Truth)
+- L2 Refined Layer (정형화, 표준 계정과목 매핑 반영, 회계 검증)
+- L3 Model Layer (사용자별 가정/시나리오/버전 관리 기반 모델링 결과)
+
+[데이터 흐름]
+External Providers (OpenDART API, KRX OpenAPI)
+   → Ingestion Scheduler/Queue
+      → Raw Archive Storage (JSONB/HTML/BLOB + Hash + Audit logs)
+         → Meta Index / Normalization
+            → Validation (Accounting sanity checks)
+               → Refined Tables (3-Statement normalized)
+                  → Modeling Engine (DCF, WACC, SOTP, scenario)
+                     → API / UI (Next.js) + Cache + Observability
+
+[컴포넌트 구성]
+A) Frontend: Next.js 14/15 (App Router) + Tailwind + shadcn/ui + Framer Motion + GSAP
+B) API / App Server: Next.js API Routes (Node.js 22 LTS)
+C) Backend Logic Engine (옵션/혼합):
+   - Node 중심: TypeScript Financial Engine + BullMQ(Redis)
+   - Python 중심(선택): FastAPI + Celery(Redis) + FinanceToolkit + Playwright
+   ※ 본 명세는 “Node 중심 + (필요 시 Python 워커 혼합)” 하이브리드도 지원하도록 설계한다.
+D) Database: PostgreSQL 16 (Decimal/NUMERIC 필수), Redis (cache/queue/session)
+E) Storage: Postgres JSONB + (선택) S3/Glacier for large Raw HTML/PDF archives
+F) Observability: Sentry, Prometheus, Grafana (Metrics/Tracing/Logs)
+
+───────────────────────────────────────────────────────────────────────────────
+2. 역할 분담 (Detailed Responsibility)
+───────────────────────────────────────────────────────────────────────────────
+2.1 @Moonyoung Choi — System Architect & DevOps
+- Full-Stack Infrastructure:
+  * Next.js App Router 기반 SSR/Server Components/API Route 설계
+  * Node.js 환경에서 대용량 I/O 최적화 (streaming, backpressure, pagination)
+- Ingestion Pipeline 설계:
+  * DART/KRX Rate Limit 고려한 스케줄러/큐/재시도 전략
+  * Raw Data 무결성 보장을 위한 Hash Checksum/Immutable Storage 구현
+- DevOps & Security:
+  * Docker 컨테이너 lifecycle (compose → ECS/Fargate)
+  * API Key 관리 (Vault/Parameter Store/Secrets Manager), VPC 환경 구성
+
+2.2 @Jeon Jeong Soo — Domain Expert & Model Logic
+- Financial Engine 코드화:
+  * Excel 기반 3-Statement / DCF / SOTP를 TypeScript 클래스로 추상화
+  * 회계 예외(일회성 비용, 자본 조정, IFRS 특수 케이스) 표준 가이드 작성
+- 데이터 매핑 스키마 정의:
+  * 기업별 공시 계정 과목을 표준 계정 체계(Standard Taxonomy)로 통합하는 매핑 테이블 설계
+- QA & Validation:
+  * 웹 산출값과 실무 모델의 오차 0.01% 이하를 목표로 하는 테스트 케이스 설계
+  * 회계 방정식/연결관계/계정누락 탐지 로직 정의
+
+───────────────────────────────────────────────────────────────────────────────
+3. 핵심 기능 요구사항 (Functional Requirements)
+───────────────────────────────────────────────────────────────────────────────
+3.1 Raw Data Lake (L1)
+- OpenDART 재무제표 전문(JSON) 수집/보존
+- KRX 시세/실시간 또는 준실시간 데이터 수집(브라우저 렌더링 기반 포함)
+- 사업보고서 내 비정형 텍스트/주석 표 등 HTML 캡처(Playwright)
+- Raw Payload는 Insert-only, 원본 변조 방지
+- 해시 및 감사 로그 기반 검증 가능
+- DLQ(Dead Letter Queue) 격리 + 관리자 알림/대시보드 표시
+- 1년 이상 Raw HTML/PDF는 자동 압축/Cold Storage(Glacier) 이관, DB에는 링크/권한만 유지
+
+3.2 Refined Layer (L2)
+- Raw에서 추출/정형화된 3-Statement:
+  * Income Statement (IS)
+  * Balance Sheet (BS)
+  * Cash Flow (CF)
+- 표준 계정 과목 매핑:
+  * 기업별/업종별 계정 명칭 변형을 표준 taxonomy로 통합
+- 기본 검증:
+  * Assets = Liabilities + Equity
+  * Cash roll-forward: CF 기말현금 = BS 현금
+  * Net Income linkage: IS 당기순이익 → BS 이익잉여금(변동) 연결
+
+3.3 Model Layer (L3)
+- 사용자별 모델/시나리오 관리:
+  * Base / Bull / Bear
+  * Versioning (시나리오 스냅샷, 변경 내역)
+- DCF:
+  * FCF forecast + WACC + Terminal Value(Perpetuity 성장법)
+- WACC:
+  * WACC = (E/V * Re) + (D/V * Rd * (1 - Tc))
+- SOTP(Phase 2+):
+  * 사업부별 가치 평가, 합산 가치 산출
+- 고성능 시뮬레이션:
+  * 가정치 변경 시 빠른 재계산/캐싱/증분 업데이트
+
+3.4 UI/UX (Frontend)
+- IB/PE 친화적 고밀도 그리드 + 다크 모드
+- 애니메이션:
+  * Framer Motion: page transition, modal, list appear
+  * GSAP: 시계열 차트 드로잉/숫자 카운트업
+- 데이터 탐색:
+  * 기업 검색/티커 입력
+  * 보고서/연도/분기 선택
+  * Raw 보기(감사 모드) + Refined 보기 + Model 보기 분리
+- Integrity Dashboard:
+  * 수집 성공률, 실패 유형, DLQ 수량, 해시 검증 결과
+  * provider별/티커별/기간별 통계
+
+───────────────────────────────────────────────────────────────────────────────
+4. [초정밀] Raw Data Storage 7-Step Immutable Pipeline (최종 통합 명세)
+───────────────────────────────────────────────────────────────────────────────
+※ 본 파이프라인은 “중간 변형을 최소화”하고 “복구/감사/증명 가능”을 최우선으로 설계한다.
+
+Step 1) Pre-flight Audit Logging (사전 감사 기록)
+- 목적:
+  * 장애/서버 셧다운 시 재개 지점 체크포인트 확보
+  * 누가/언제/무엇을 요청했는지 추적성 확보
+- 동작:
+  * fetch_jobs(또는 fetch_queue) 테이블에 아래를 Insert:
+    - task_id / request_id (UUID)
+    - provider (DART/KRX/NAVER/ETC)
+    - endpoint
+    - params (ticker, date, report_code 등) JSONB
+    - status: PENDING
+    - created_at
+- 규칙:
+  * 실행 시작 전 반드시 기록, 이후 단계는 task_id로 trace
+
+Step 2) Dual-Channel Ingestion (이중 채널 수집)
+- Channel A: OpenDART API
+  * 재무제표 전문(JSON/XML)을 수집
+  * 응답 헤더 (ETag/Last-Modified 등)가 존재하면 함께 저장(변경 감지)
+- Channel B: Playwright Engine
+  * API로 제공되지 않는 KRX 가격/호가/지표 페이지 렌더링 캡처
+  * 사업보고서 내 비정형 텍스트/주석표 HTML을 렌더링 후 raw_html로 저장
+- 규칙:
+  * Step 2의 산출물은 “파싱 전 원본 그대로” 유지
+
+Step 3) Immutable Raw Blob Storage (불변 원본 적재)
+- 목적:
+  * 파싱 로직/버전이 바뀌어도 원본은 항상 동일하게 재현 가능
+- 저장소:
+  A) PostgreSQL JSONB
+  B) 외부 스토리지(S3) — 대형 HTML/PDF/첨부 원본
+- 테이블(통합):
+  * source_raw_archives
+    - id (UUID)
+    - task_id (FK → fetch_jobs)
+    - provider
+    - raw_payload (JSONB)  // API 전문
+    - raw_html (TEXT)      // 렌더링 캡처(필요 시)
+    - raw_binary (BYTEA)   // 바이너리 응답(선택)
+    - etag (VARCHAR)       // 응답 헤더 기반 변경 감지(가능하면)
+    - received_at (TIMESTAMP)
+- 규칙:
+  * Insert-only, Update 금지
+
+Step 4) Integrity Hashing (해시 검증)
+- 목적:
+  * 원본 변조 여부를 수학적으로 증명
+- 동작:
+  * raw_payload/raw_html/raw_binary의 canonical form(정규화 규칙 명시)으로 SHA-256 생성
+  * data_integrity_logs에 기록
+- 테이블:
+  * data_integrity_logs
+    - id (UUID)
+    - raw_archive_id (FK)
+    - sha256 (CHAR(64))
+    - hash_algo (default: SHA-256)
+    - computed_at
+    - verifier_version (hash compute code version)
+- 규칙:
+  * canonicalization rules:
+    - JSON: key order 정렬(표준화) 후 bytes
+    - HTML: 원문 그대로(가능하면), 또는 명시적 normalize(공백 처리) 정책 문서화
+    - 바이너리: raw bytes 그대로
+
+Step 5) Entity Normalization & Meta-Indexing (개체 정문화/메타 인덱싱)
+- 목적:
+  * Raw 레이크에서 “찾기”를 빠르게 하기 위한 얕은 인덱싱
+- 동작:
+  * 원본을 수정하지 않고, 검색에 필요한 핵심 메타만 추출하여 별도 테이블 저장
+- 테이블:
+  * source_raw_meta_index
+    - id (UUID)
+    - raw_archive_id (FK)
+    - ticker
+    - corp_name
+    - report_code
+    - fiscal_year
+    - fiscal_quarter
+    - closing_month
+    - document_type (FS/Price/Report/Note 등)
+    - created_at
+- 규칙:
+  * 원본은 건드리지 않음
+  * meta_index는 재생성 가능(파생 데이터)
+
+Step 6) Validation & DLQ (검증 및 실패 처리)
+- 목적:
+  * 최소한의 회계적 sanity check로 “명백한 오류” 격리
+- 검증 예:
+  * Assets = Liabilities + Equity
+  * 음수/비정상 스케일(단위 혼동) 탐지
+  * 누락 필드/필수 계정 absence
+- 실패 처리:
+  * DLQ(Redis) 또는 dlq_records 테이블에 격리
+  * stack trace, provider 응답코드, 재시도 횟수 기록
+  * 3회 자동 재시도(지수 백오프)
+  * 관리자 대시보드 알림 + Sentry event
+- DLQ 저장(예):
+  * dlq_records
+    - id (UUID)
+    - task_id
+    - raw_archive_id (nullable)
+    - error_type
+    - error_message
+    - stack_trace
+    - retry_count
+    - next_retry_at
+    - created_at
+
+Step 7) Lifecycle Management (수명 주기 관리 / Cold Storage)
+- 목적:
+  * 저장 비용 최적화 + 장기 보존
+- 정책:
+  * 1년 이상 지난 Raw HTML/PDF → 자동 압축 후 Cold Storage(Glacier) 이동
+  * DB에는 객체 URL/키, 접근권한 정보만 유지
+- 테이블:
+  * raw_archive_storage_pointers
+    - id (UUID)
+    - raw_archive_id (FK)
+    - storage_tier (HOT/WARM/COLD)
+    - object_key
+    - moved_at
+    - retention_policy_version
+
+───────────────────────────────────────────────────────────────────────────────
+5. 기술 스택 명세 (2026 Modern Stack / Expanded)
+───────────────────────────────────────────────────────────────────────────────
+5.1 Frontend (Visual Excellence)
+- Framework: Next.js 14/15 (App Router)
+- Language: TypeScript
+- Styling: Tailwind CSS + shadcn/ui (다크모드, 그리드, 컴포넌트 품질)
+- Interaction:
+  * Framer Motion: page transition, modal, list animation
+  * GSAP: 차트 드로잉, 카운트업, 고급 타임라인 애니메이션
+- Data Fetching / Cache:
+  * TanStack Query v5 (React Query)
+  * Background Refetching, staleTime 설정
+- ORM (Server Components):
+  * Prisma 또는 Drizzle (Type-safe)
+- Charts/DataGrid:
+  * (선택) High-performance grid (AG Grid / TanStack Table)
+  * (선택) charting: ECharts / TradingView lightweight / custom canvas
+
+5.2 Backend / App Server
+- Runtime: Node.js 22.x LTS
+- API: Next.js API Routes (Edge runtime 선택적 적용)
+- Async Task (Node):
+  * BullMQ + Redis
+- Scraping:
+  * Playwright (Headless)
+- (옵션) Python 워커:
+  * FastAPI + Celery + Redis
+  * FinanceToolkit (DCF/WACC/성장률 등 검증된 수식 활용)
+  * Playwright (Python)도 가능하지만, Node Playwright와 이중 운영 시 관리 정책 필요
+
+5.3 Database & Cache
+- PostgreSQL 16:
+  * NUMERIC/DECIMAL 타입 사용(금융 오차 방지)
+  * JSONB(원본 payload) + 인덱스 설계 (GIN index)
+- Redis:
+  * cache
+  * sessions
+  * queue (BullMQ/Celery broker)
+  * DLQ(옵션)
+
+5.4 Observability
+- Sentry: 에러 트래킹 (파싱/계산 예외 즉시 알림)
+- Prometheus + Grafana:
+  * ingestion throughput
+  * API latency
+  * DB load
+  * queue depth
+  * DLQ metrics
+
+───────────────────────────────────────────────────────────────────────────────
+6. 데이터 모델 (Database Schema — Expanded Draft)
+───────────────────────────────────────────────────────────────────────────────
+※ 실제 구현 전 ERD 확정 필요. 아래는 “원칙/흐름”을 반영한 권장 스키마.
+
+6.1 Ingestion / Audit
+- fetch_jobs
+  - task_id UUID PK
+  - provider TEXT
+  - endpoint TEXT
+  - params JSONB
+  - status TEXT (PENDING/RUNNING/SUCCESS/FAILED)
+  - attempts INT
+  - last_error TEXT
+  - created_at TIMESTAMP
+  - updated_at TIMESTAMP
+  - started_at TIMESTAMP
+  - finished_at TIMESTAMP
+
+6.2 Raw Archives (Insert-only)
+- source_raw_archives
+  - id UUID PK
+  - task_id UUID FK(fetch_jobs)
+  - provider TEXT
+  - raw_payload JSONB NULL
+  - raw_html TEXT NULL
+  - raw_binary BYTEA NULL
+  - etag VARCHAR NULL
+  - received_at TIMESTAMP
+
+6.3 Integrity
+- data_integrity_logs
+  - id UUID PK
+  - raw_archive_id UUID FK(source_raw_archives)
+  - sha256 CHAR(64)
+  - hash_algo TEXT
+  - computed_at TIMESTAMP
+  - verifier_version TEXT
+
+6.4 Meta Index
+- source_raw_meta_index
+  - id UUID PK
+  - raw_archive_id UUID FK(source_raw_archives)
+  - ticker TEXT
+  - corp_name TEXT
+  - report_code TEXT
+  - fiscal_year INT
+  - fiscal_quarter INT NULL
+  - closing_month INT NULL
+  - document_type TEXT
+  - created_at TIMESTAMP
+  - indexes:
+    * (ticker, fiscal_year, report_code)
+    * GIN on optional json fields
+
+6.5 DLQ / Failures
+- dlq_records
+  - id UUID PK
+  - task_id UUID
+  - raw_archive_id UUID NULL
+  - error_type TEXT
+  - error_message TEXT
+  - stack_trace TEXT
+  - retry_count INT
+  - next_retry_at TIMESTAMP
+  - created_at TIMESTAMP
+
+6.6 Refined (Normalized Financial Accounts)
+- financial_accounts
+  - id UUID PK
+  - ticker TEXT
+  - fiscal_year INT
+  - fiscal_quarter INT NULL
+  - statement_type TEXT (IS/BS/CF)
+  - standard_account_code TEXT (taxonomy code)
+  - standard_account_name TEXT
+  - reported_account_name TEXT (원문 계정명)
+  - value NUMERIC(30,10)
+  - unit TEXT (KRW, million KRW 등)
+  - source_raw_archive_id UUID FK(source_raw_archives)
+  - created_at TIMESTAMP
+
+6.7 Taxonomy & Mapping
+- standard_taxonomy
+  - account_code TEXT PK
+  - account_name TEXT
+  - statement_type TEXT (IS/BS/CF)
+  - parent_code TEXT NULL
+  - is_required BOOLEAN
+  - description TEXT
+
+- account_mapping_rules
+  - id UUID PK
+  - provider TEXT
+  - reported_account_name_pattern TEXT (regex/like)
+  - ticker_scope TEXT NULL (특정 기업 한정 규칙)
+  - standard_account_code TEXT FK(standard_taxonomy)
+  - priority INT
+  - created_at TIMESTAMP
+
+6.8 Model Layer (User/Scenario)
+- users
+  - id UUID PK
+  - email TEXT UNIQUE
+  - password_hash TEXT (또는 SSO)
+  - created_at TIMESTAMP
+
+- models
+  - id UUID PK
+  - user_id UUID FK(users)
+  - ticker TEXT
+  - name TEXT
+  - base_fiscal_year INT
+  - created_at TIMESTAMP
+
+- scenarios
+  - id UUID PK
+  - model_id UUID FK(models)
+  - name TEXT (Base/Bull/Bear/custom)
+  - assumptions JSONB (growth, margin, capex, nwc, wacc inputs 등)
+  - version INT
+  - created_at TIMESTAMP
+  - updated_at TIMESTAMP
+
+- model_outputs
+  - id UUID PK
+  - scenario_id UUID FK(scenarios)
+  - output_type TEXT (DCF/WACC/3ST_forecast/etc)
+  - output_payload JSONB
+  - computed_at TIMESTAMP
+  - engine_version TEXT
+
+───────────────────────────────────────────────────────────────────────────────
+7. API 명세 (Next.js API Routes 기준 — Draft)
+───────────────────────────────────────────────────────────────────────────────
+[공통 원칙]
+- 모든 응답은 request_id/task_id/trace_id를 포함 가능 (관측성)
+- 숫자형 값은 문자열로 직렬화(프론트에서 Decimal 처리) 혹은 fixed precision 정책 통일
+- pagination, caching headers, etag 지원 고려
+
+7.1 Data Lake 조회
+GET /api/raw/search?ticker=...&year=...&report_code=...&provider=...
+- 목적: meta-index 기반 raw archive 탐색
+- 응답:
+  - raw_archive_id, received_at, provider, report_code, fiscal_year, hash_sha256 등
+
+GET /api/raw/:raw_archive_id
+- 목적: 원본 raw_payload/raw_html 접근(감사 모드)
+- 권한: 관리자 또는 감사 모드 권한 필요
+
+7.2 Refined 조회
+GET /api/financials/3st?ticker=...&year=...&quarter=...
+- 목적: 정형화된 3-Statement 반환
+- 응답:
+  - IS/BS/CF 계정 리스트
+  - source references(raw_archive_id), 검증 상태(validation_status)
+
+GET /api/financials/accounts?ticker=...&year=...&statement=BS
+- 목적: 계정단 조회(표준 taxonomy 포함)
+
+7.3 Integrity Dashboard
+GET /api/admin/integrity/summary?from=...&to=...
+- 목적: 수집 성공률, DLQ 수량, provider별 실패율, 해시 검증 결과 요약
+
+GET /api/admin/dlq?status=...&provider=...
+- 목적: DLQ 레코드 조회/재시도 트리거(POST와 분리 가능)
+
+7.4 Modeling
+POST /api/model/run
+- body:
+  - ticker
+  - scenario_id OR assumptions
+  - model_type (DCF/WACC/3ST)
+- 응답:
+  - output_id, computed_at, output_payload summary
+
+GET /api/model/output/:output_id
+- 목적: 모델 결과 조회
+
+───────────────────────────────────────────────────────────────────────────────
+8. Financial Modeling Engine (TypeScript 중심 설계)
+───────────────────────────────────────────────────────────────────────────────
+8.1 설계 목표
+- Excel 수준의 연결성(3-Statement linkage)을 Circular Reference 없이 구현
+- 모든 계산은 deterministic & testable
+- 입력(Refined data + assumptions)과 출력(model outputs) 분리
+- 엔진 버전 관리(engine_version)로 재현성 확보
+
+8.2 핵심 모듈
+A) Data Adapters
+- Refined financial_accounts → typed structures 변환
+- 단위(unit) 정규화 및 스케일링 정책(예: KRW vs million KRW) 일원화
+
+B) 3-Statement Linkage Module
+- 규칙:
+  * CF 기말현금 == BS 현금
+  * IS 당기순이익 → BS 이익잉여금 변동
+  * 감가상각/자본적지출/운전자본 변화가 CF에 올바르게 반영
+- 출력:
+  * historical + forecast statements
+
+C) DCF Module
+- 입력:
+  * Forecast FCF series (N years)
+  * WACC
+  * Terminal growth (g) or exit multiple 정책
+- 계산:
+  * PV(FCF) + PV(Terminal Value) = Enterprise Value
+  * Equity Value = EV - Net Debt (+ cash adj)
+  * Per-share value (옵션: shares outstanding raw ingest 필요)
+
+D) WACC Module
+- 입력:
+  * Risk-free rate, ERP, beta, cost of debt, tax rate, capital structure
+- 출력:
+  * WACC, components, sensitivity table
+
+E) Sensitivity / Scenario Engine
+- grid 기반 (WACC x g) 매트릭스
+- 빠른 계산을 위한 caching/partial recompute
+
+8.3 정확도 요구(정량)
+- 실무 모델 대비 오차 목표: 0.01% 이하(또는 절대 오차 기준 별도 정의)
+- Decimal arithmetic:
+  * JS number 사용 금지(권장), decimal.js 또는 big.js 도입
+  * DB NUMERIC ↔ API ↔ FE 표준 직렬화 규칙 필수
+
+───────────────────────────────────────────────────────────────────────────────
+9. Ingestion Scheduler / Queue / Rate Limit 전략
+───────────────────────────────────────────────────────────────────────────────
+9.1 스케줄링
+- 목표: KRX 전 종목 최근 5년치 Raw 적재 (Phase 1 Definition of Success)
+- 전략:
+  * ticker universe를 chunk로 분할
+  * 기간(year/quarter)도 chunk로 분할
+  * fetch_jobs에 PENDING 생성 → 워커가 claim
+
+9.2 Rate Limit 대응
+- provider별 rate limit 정책 테이블화:
+  * provider_rate_limits(provider, max_rps, max_concurrency, cooldown_rules)
+- 워커는 token bucket 또는 leaky bucket 기반 throttling
+- 응답이 429/5xx일 경우:
+  * 지수 백오프 + jitter
+  * max_attempts 도달 시 DLQ로 이동
+
+9.3 Idempotency
+- 동일 params 요청이 중복 실행되더라도 raw는 Insert-only로 “중복 저장” 가능.
+- 그러나 비용 절감/중복 방지를 위해:
+  * (provider, ticker, date, report_code, etag) 기반 dedupe 정책 옵션 제공
+  * dedupe를 “원본 삭제”가 아닌 “meta-index에서 canonical 선택”으로 처리
+
+───────────────────────────────────────────────────────────────────────────────
+10. DevOps / Deployment (Phase 1)
+───────────────────────────────────────────────────────────────────────────────
+10.1 CI/CD
+- GitHub Actions:
+  * on push: lint + typecheck + unit test
+  * on main merge: build + deploy
+- Frontend:
+  * Vercel 배포(SSR/Edge 활용 가능)
+- Ingestion Worker:
+  * Docker → AWS ECS/Fargate (독립 배포, 스케일 아웃)
+
+10.2 Docker Compose (Local Dev)
+- services:
+  * postgres
+  * redis
+  * nextjs-app
+  * worker (bullmq/celery)
+  * grafana/prometheus (optional)
+- seed scripts:
+  * taxonomy seed
+  * sample tickers + ingestion dev mode
+
+10.3 Security
+- API Keys:
+  * 로컬: .env (gitignore)
+  * 프로덕션: AWS Secrets Manager / Parameter Store
+- Network:
+  * VPC 내부 통신, DB는 private subnet
+- Access Control:
+  * raw payload 접근은 관리자/감사 권한 제한
+  * audit log 기록(누가 raw를 열람했는지)
+
+───────────────────────────────────────────────────────────────────────────────
+11. Observability / Monitoring / Logging
+───────────────────────────────────────────────────────────────────────────────
+11.1 Logging
+- 구조화 로그(JSON):
+  * task_id, request_id, ticker, provider, endpoint, latency, status
+- 저장:
+  * CloudWatch 또는 ELK(선택)
+
+11.2 Metrics (Prometheus)
+- ingestion_jobs_total{status,provider}
+- ingestion_latency_seconds{provider}
+- queue_depth{queue_name}
+- dlq_total{provider,error_type}
+- api_latency_ms{route}
+- db_connections, db_slow_queries_total
+
+11.3 Alerting
+- Sentry:
+  * 파싱 오류/계산 엔진 예외/업데이트로 인한 regression
+- Grafana Alerts:
+  * DLQ 급증
+  * ingestion success rate 급락
+  * API p95 latency 초과
+
+───────────────────────────────────────────────────────────────────────────────
+12. 테스트 전략 (QA & Validation)
+───────────────────────────────────────────────────────────────────────────────
+12.1 Unit Tests
+- Financial engine:
+  * DCF, WACC, 3ST linkage 개별 모듈 테스트
+  * Decimal 정밀도 테스트 (rounding 규칙 고정)
+- Mapping:
+  * 계정 매핑 룰이 특정 입력에 대해 올바른 표준 계정 코드 반환하는지
+
+12.2 Integration Tests
+- ingestion → raw → meta index → refined → model run end-to-end
+- provider mock + rate limit simulation
+
+12.3 Golden Dataset / Regression
+- 실무 엑셀 모델을 정답(golden)으로 저장:
+  * 입력 raw/refined + assumptions + expected outputs
+  * 코드 변경 시 output diff 자동 비교
+
+12.4 Validation Ruleset
+- 회계 검증:
+  * Assets = L + E (tolerance 정책)
+  * cash roll-forward
+- 데이터 품질:
+  * 단위/스케일 이상치 탐지
+  * 누락 계정 최소화(필수 계정 is_required)
+
+───────────────────────────────────────────────────────────────────────────────
+13. UI 명세 (IB/PE-grade UX)
+───────────────────────────────────────────────────────────────────────────────
+13.1 정보 구조 (IA)
+- Dashboard
+  * 최근 수집 상태, 인기 티커, 모델링 작업 바로가기
+- Company Workspace
+  * Overview
+  * Raw (Audit Mode)
+  * Refined (3-Statement)
+  * Modeling (DCF/WACC/Sensitivity)
+- Admin
+  * Integrity Dashboard
+  * DLQ Manager
+  * Provider Health
+
+13.2 Audit Mode (핵심)
+- raw_payload/raw_html 열람
+- sha256 해시 표시 및 검증 결과 배지
+- “이 데이터는 언제 어떤 params로 수집되었는가?”를 1클릭으로 추적 (fetch_jobs 링크)
+
+13.3 고성능 데이터 그리드
+- 열 고정, 행 그룹핑, 계정 트리, 단위 변환 표시
+- export (CSV/Excel) 옵션 (Phase 2+ 가능)
+
+13.4 애니메이션 가이드
+- Framer Motion: route transitions / modals
+- GSAP: chart line draw / count-up
+- 원칙: 금융 실무자는 “과한 애니메이션”을 싫어할 수 있으므로
+  * 기본은 절제된 애니메이션
+  * 고급 모드는 토글 옵션 제공
+
+───────────────────────────────────────────────────────────────────────────────
+14. 성능 / 비기능 요구사항 (Non-Functional Requirements)
+───────────────────────────────────────────────────────────────────────────────
+- 정확성:
+  * 숫자 오차 최소화(Decimal end-to-end)
+- 재현성:
+  * raw + hash + engine_version + assumptions version으로 결과 재현 가능
+- 확장성:
+  * ingestion 워커 수평 확장
+  * DB 인덱스 설계 및 파티셔닝(대형 데이터 대비, Phase 2+)
+- 내결함성:
+  * 작업 재시도, DLQ 격리, partial failure 허용
+- 보안:
+  * raw 데이터 접근 통제
+  * 키/시크릿 안전 관리
+- 비용 최적화:
+  * cold storage lifecycle
+  * 캐싱 전략(redis + HTTP caching)
+
+───────────────────────────────────────────────────────────────────────────────
+15. Phase 1 최종 산출물 (Definition of Success — 상세화)
+───────────────────────────────────────────────────────────────────────────────
+1) Data Lake 구축 완료
+- KRX 전 종목 최근 5년치 Raw Data가 PostgreSQL JSONB에 적재
+- 해시 검증 로그가 모두 생성되어 원본 무결성 증명 가능
+
+2) Integrity Dashboard
+- 수집 성공률, 유실 여부, DLQ, provider health가 한 화면에서 확인 가능
+- 특정 실패 건에 대해 “원본/요청 파라미터/에러/재시도”까지 추적 가능
+
+3) Core API
+- ticker 입력 시 3-Statement Raw Table 또는 Refined Table을 반환
+- 감사 모드에서 raw 접근 가능(권한 제한)
+
+4) Modeling Prototype
+- TypeScript 기반 DCF 계산 엔진
+- Unit Test 및 golden dataset regression 통과
+
+───────────────────────────────────────────────────────────────────────────────
+16. Next Step (Action Items)
+───────────────────────────────────────────────────────────────────────────────
+- @Moonyoung Choi
+  1) Docker Compose 설정
+  2) Next.js 초기 프로젝트 셋업 (App Router + Prisma/Drizzle + Redis + BullMQ 기본 골격)
+  3) Raw Ingestion 파이프라인(7-step) MVP 구현 (fetch_jobs → raw_archives → hash → meta_index → DLQ)
+
+- @Jeon Jeong Soo
+  1) 표준 계정 과목 매핑 정의서(Excel) 작성 시작
+  2) Standard Taxonomy 초안(코드/계층/필수 계정) 설계
+  3) 회계 예외/검증 규칙 문서화 + 테스트 케이스 프레임 설계
+
+───────────────────────────────────────────────────────────────────────────────
+17. 부록 A — 구현 시 반드시 문서화해야 하는 “정책(Policy) 목록”
+───────────────────────────────────────────────────────────────────────────────
+- JSON canonicalization 규칙(해시 생성 시)
+- 단위/스케일 정책(KRW vs 백만원 등)
+- Decimal rounding 규칙(은행가 반올림 여부, 소수점 자리수)
+- dedupe 정책(중복 raw 저장 허용 여부, canonical 선택 방식)
+- DLQ 재시도 정책(백오프, 최대 시도 수, 수동 재처리)
+- Access Control 정책(raw 열람 권한)
+- Cold storage lifecycle 정책(기준 기간, 압축 포맷, 복구 절차)
+- Engine versioning 정책(결과 재현을 위한 버전 관리)
+
+───────────────────────────────────────────────────────────────────────────────
+18. 부록 B — “프로그램 명세서” 완료 기준 체크리스트
+───────────────────────────────────────────────────────────────────────────────
+[데이터]
+□ fetch_jobs가 사전 기록되고 checkpoint로 동작한다
+□ raw_archives는 insert-only다
+□ hash가 생성되고 integrity_logs에 저장된다
+□ meta_index로 빠른 검색이 가능하다
+□ 검증 실패는 DLQ로 격리된다
+□ 1년 초과 raw는 cold storage 정책이 있다
+
+[엔진]
+□ 3-Statement linkage가 circular reference 없이 구현된다
+□ DCF/WACC 모듈이 deterministic & testable하다
+□ Golden dataset regression 테스트가 있다
+
+[서비스]
+□ API endpoint가 정의되어 있고 권한이 분리되어 있다
+□ 대시보드가 ingestion 품질을 요약한다
+□ observability(sentry/metrics)가 붙어 있다
+□ 배포 전략(vercel + ecs/fargate)이 문서화되어 있다
+
+───────────────────────────────────────────────────────────────────────────────
+END OF SPEC
+───────────────────────────────────────────────────────────────────────────────
