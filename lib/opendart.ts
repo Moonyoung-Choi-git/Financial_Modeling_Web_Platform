@@ -7,7 +7,8 @@ export async function fetchOpenDart(endpoint: string, params: Record<string, any
   // 필요 시 provider_rate_limits 테이블에서 조회하도록 고도화 가능
   await checkRateLimit('OPENDART', 100, 60);
 
-  const apiKey = process.env.OPENDART_API_KEY;
+  // 제공된 API 키를 기본값으로 사용 (보안을 위해 실제 운영 시에는 .env 파일 사용 권장)
+  const apiKey = process.env.OPENDART_API_KEY || 'c5a26ff1ed22c23f179db8537f5d99a2a4b6d30c';
   if (!apiKey) {
     throw new Error('OPENDART_API_KEY is not configured in .env');
   }
@@ -44,4 +45,28 @@ export async function fetchOpenDart(endpoint: string, params: Record<string, any
     payload: data,
     etag: response.headers.get('etag') || undefined,
   };
+}
+
+/**
+ * DART 고유번호(corp_code) XML 파일(ZIP)을 다운로드합니다.
+ * 바이너리 데이터(ArrayBuffer)를 반환합니다.
+ */
+export async function fetchCorpCodeFile() {
+  await checkRateLimit('OPENDART', 100, 60);
+
+  const apiKey = process.env.OPENDART_API_KEY || 'c5a26ff1ed22c23f179db8537f5d99a2a4b6d30c';
+  if (!apiKey) {
+    throw new Error('OPENDART_API_KEY is not configured in .env');
+  }
+
+  const url = new URL(`${OPENDART_BASE_URL}/corpCode.xml`);
+  url.searchParams.append('crtfc_key', apiKey);
+
+  const response = await fetch(url.toString());
+
+  if (!response.ok) {
+    throw new Error(`OpenDART API Error (corpCode): ${response.status} ${response.statusText}`);
+  }
+
+  return response.arrayBuffer();
 }

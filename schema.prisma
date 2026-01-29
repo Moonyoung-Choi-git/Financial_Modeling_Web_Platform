@@ -232,3 +232,15 @@ model RawArchiveStoragePointer {
 
   @@map("raw_archive_storage_pointers")
 }
+
+// 8. Master Data (Corp Code)
+model CorpCode {
+  code        String   @id @map("corp_code") // DART 고유번호 (8자리)
+  name        String   @map("corp_name")
+  stockCode   String?  @map("stock_code")    // 상장 종목코드 (6자리), 비상장은 null 또는 공백
+  modifyDate  String   @map("modify_date")   // YYYYMMDD
+  updatedAt   DateTime @default(now()) @map("updated_at")
+
+  @@index([stockCode])
+  @@map("corp_codes")
+}

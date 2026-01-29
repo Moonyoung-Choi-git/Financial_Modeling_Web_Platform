@@ -89,6 +89,18 @@ export async function GET(request: Request) {
         await refineFinancialData(latestRaw.rawArchiveId);
         accounts = await prisma.financialAccount.findMany(findOptions);
       }
+
+      // 데이터 정제 후에도 계정이 없다면, 원본 데이터가 없었을 가능성이 높습니다.
+      // 이 경우 더 명확한 에러를 반환하여 프론트엔드에서 구체적인 안내를 할 수 있도록 합니다.
+      if (accounts.length === 0 && !latestRaw) {
+        return NextResponse.json(
+          {
+            error: `No raw data found for ticker ${ticker} and year ${fiscalYear}. Please run the ingestion process first.`,
+            errorCode: 'RAW_DATA_MISSING',
+          },
+          { status: 404 }
+        );
+      }
     }
 
     return NextResponse.json({

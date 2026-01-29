@@ -1,5 +1,6 @@
 import prisma from './db';
 import { computeHash } from './crypto';
+import { fetchOpenDart } from './opendart';
 
 /**
  * Step 1: Pre-flight Audit Logging
@@ -38,7 +39,12 @@ export async function processIngestionTask(taskId: string) {
   try {
     // Step 2: Dual-Channel Ingestion (Mocking Fetch for MVP)
     // 실제 구현 시에는 axios/fetch 또는 Playwright 사용
-    const fetchedData = await mockFetch(job.provider, job.endpoint, job.params);
+    let fetchedData;
+    if (job.provider === 'OPENDART') {
+      fetchedData = await fetchOpenDart(job.endpoint, job.params as Record<string, any>);
+    } else {
+      throw new Error(`Unsupported provider: ${job.provider}`);
+    }
 
     // Step 3: Immutable Raw Blob Storage
     // 원본 데이터를 변형 없이 저장
@@ -117,20 +123,43 @@ export async function processIngestionTask(taskId: string) {
   }
 }
 
-// Mock Fetch Function
-async function mockFetch(provider: string, endpoint: string, params: any) {
-  // 실제 API 호출을 시뮬레이션
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  
-  return {
-    payload: {
-      status: 'OK',
-      data: {
-        ...params,
-        revenue: 100000000,
-        netIncome: 20000000,
-      },
-    },
-    etag: 'mock-etag-12345',
+/**
+ * Ticker를 기반으로 DART 재무제표 수집 작업을 생성합니다.
+ * CorpCode 테이블에서 고유번호를 조회하여 API 파라미터를 구성합니다.
+ * 
+ * @param ticker 종목코드 (예: 005930)
+ * @param year 사업연도 (예: 2023)
+ * @param reportCode 보고서 코드 (기본값: 11011 사업보고서)
+ */
+export async function createFinancialStatementTask(
+  ticker: string,
+  year: number,
+  reportCode: string = '11011' // 11011: 사업보고서, 11012: 반기, 11013: 1분기, 11014: 3분기
+) {
+  // 1. CorpCode 조회
+  const corpInfo = await prisma.corpCode.findFirst({
+    where: { stockCode: ticker },
+  });
+
+  if (!corpInfo) {
+    throw new Error(`CorpCode not found for ticker: ${ticker}. Please ensure syncCorpCodes() has been run.`);
+  }
+
+  // 2. 파라미터 구성
+  // DART API 파라미터(corp_code 등)와 내부 메타데이터용 파라미터(ticker 등)를 함께 구성
+  const params = {
+    corp_code: corpInfo.code,
+    bsns_year: year.toString(),
+    reprt_code: reportCode,
+    fs_div: 'CFS', // 연결재무제표 (Consolidated)
+    
+    // 내부 메타데이터용 (processIngestionTask에서 사용)
+    ticker: ticker,
+    corpName: corpInfo.name,
+    year: year.toString(),
+    reportCode: reportCode
   };
+
+  // 3. 작업 생성 (fnlttSinglAcntAll: 단일회사 전체 재무제표)
+  return createIngestionTask('OPENDART', 'fnlttSinglAcntAll', params);
 }
