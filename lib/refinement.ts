@@ -15,10 +15,13 @@ interface OpenDartItem {
  * @returns 저장된 FinancialAccount 개수
  */
 export async function refineFinancialData(rawArchiveId: string) {
-  // 1. Raw Data 및 메타데이터 조회
+  // 1. Raw Data 및 메타데이터 조회 (FetchJob 파라미터 포함)
   const archive = await prisma.sourceRawArchive.findUnique({
     where: { id: rawArchiveId },
-    include: { metaIndex: true },
+    include: { 
+      metaIndex: true,
+      fetchJob: true // [New] 파라미터 접근을 위해 추가
+    },
   });
 
   if (!archive || !archive.rawPayload) {
@@ -37,6 +40,12 @@ export async function refineFinancialData(rawArchiveId: string) {
   const ticker = archive.metaIndex?.ticker || 'UNKNOWN';
   const year = archive.metaIndex?.fiscalYear || new Date().getFullYear();
   const quarter = archive.metaIndex?.fiscalQuarter || null;
+
+  // [New] FetchJob 파라미터에서 메타 정보 추출
+  const jobParams = archive.fetchJob?.params as any;
+  // 파라미터가 없으면 기본값 'CFS'(연결) 사용
+  const fsDiv = jobParams?.fs_div || 'CFS'; 
+  const reportCode = archive.metaIndex?.reportCode || null;
 
   // 2. 매핑 규칙 조회 (해당 Provider용)
   // 실제 운영 시에는 Redis 캐싱 등을 통해 성능 최적화 권장
@@ -80,6 +89,11 @@ export async function refineFinancialData(rawArchiveId: string) {
         ticker,
         fiscalYear: year,
         fiscalQuarter: quarter,
+        
+        // [New] 데이터 출처 성격 저장
+        fsDiv: fsDiv,
+        reportCode: reportCode,
+
         statementType: matchedRule.standardAccount.statementType,
         standardAccountCode: matchedRule.standardAccountCode,
         standardAccountName: matchedRule.standardAccount.accountName,
@@ -93,15 +107,16 @@ export async function refineFinancialData(rawArchiveId: string) {
 
   // 4. DB 저장 (Batch Insert)
   if (refinedAccounts.length > 0) {
-    // L2 데이터는 재생성 가능하므로, 중복 방지를 위해 기존 데이터 삭제 후 삽입하거나 createMany 사용
+    // L2 데이터는 재생성 가능하므로, 중복 방지를 위해 기존 데이터 삭제 후 삽입
     await prisma.financialAccount.deleteMany({
       where: { sourceRawArchiveId: archive.id },
     });
+    
     await prisma.financialAccount.createMany({
       data: refinedAccounts,
     });
   }
 
-  console.log(`[Refinement] Processed ${items.length} items, mapped ${refinedAccounts.length} accounts.`);
+  console.log(`[Refinement] Processed ${items.length} items, mapped ${refinedAccounts.length} accounts (FS: ${fsDiv}).`);
   return refinedAccounts.length;
 }

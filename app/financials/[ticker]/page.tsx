@@ -1,45 +1,53 @@
-import Link from "next/link";
-import { notFound } from "next/navigation";
-import FinancialStatementsView from "@/components/financial-statements-view";
-import { ArrowLeft, Building2 } from "lucide-react";
+import { buildThreeStatementModel } from '@/lib/modeling/builder';
+import FinancialStatementsView from '@/components/financial-statements-view';
 
 interface PageProps {
-  params: Promise<{ ticker: string }>;
+  params: { ticker: string };
 }
 
-export default async function FinancialsPage({ params }: PageProps) {
-  const { ticker } = await params;
-  const normalized = (ticker || "").trim();
+export const dynamic = 'force-dynamic';
 
-  if (!normalized) {
-    notFound();
+export default async function FinancialsPage({ params }: PageProps) {
+  const { ticker } = params;
+  
+  // 현재 연도 기준 최근 3년치 데이터 모델링 요청
+  // (실제 운영 시에는 DB 캐시를 먼저 조회하고 없으면 생성하는 로직 권장)
+  const currentYear = new Date().getFullYear();
+  const years = [currentYear - 3, currentYear - 2, currentYear - 1];
+  
+  let modelData = {};
+  let error = null;
+
+  try {
+    modelData = await buildThreeStatementModel({
+      ticker,
+      years,
+      fsDivPriority: ['CFS', 'OFS'] // 연결 우선, 없으면 개별
+    });
+  } catch (e: any) {
+    console.error('Modeling error:', e);
+    error = e.message;
   }
 
   return (
-    <div className="min-h-screen bg-background p-8">
-      <div className="mx-auto max-w-6xl space-y-8">
-        <header className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/"
-              className="rounded-full border p-2 text-muted-foreground hover:text-foreground"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-                <Building2 className="h-5 w-5" />
-                {normalized} Financials
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                Refined 3-statement view (IS/BS/CF)
-              </p>
-            </div>
+    <div className="container mx-auto py-8 px-4">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold mb-2">Financial Statements: {ticker}</h1>
+        <p className="text-gray-500">
+          Historical 3-Statement Model (Source: DART Open API)
+        </p>
+        {error && (
+          <div className="mt-4 p-4 bg-red-50 text-red-600 rounded-md">
+            Error loading model: {error}
           </div>
-        </header>
-
-        <FinancialStatementsView ticker={normalized} />
+        )}
       </div>
+
+      {/* 데이터 뷰어 컴포넌트 */}
+      <FinancialStatementsView 
+        data={modelData} 
+        years={years}
+      />
     </div>
   );
 }
