@@ -1,4 +1,4 @@
-import prisma from '../db';
+import prisma from './db';
 import { toDecimal } from './math';
 
 // OpenDART API 응답 내 개별 아이템 타입 정의 (필요한 필드만)

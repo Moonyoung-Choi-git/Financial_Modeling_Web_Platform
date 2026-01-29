@@ -1,5 +1,5 @@
-import prisma from '../db'; // db.ts가 root에 있다고 가정 (import 경로 조정 필요 시 수정)
-import { createHash } from 'crypto';
+import prisma from './db';
+import { computeHash } from './crypto';
 
 /**
  * Step 1: Pre-flight Audit Logging
@@ -18,7 +18,7 @@ export async function createIngestionTask(
       status: 'PENDING',
     },
   });
-  return job.id;
+  return job.taskId;
 }
 
 /**
@@ -54,8 +54,7 @@ export async function processIngestionTask(taskId: string) {
 
     // Step 4: Integrity Hashing
     // 저장된 데이터의 해시를 계산하여 무결성 로그 기록
-    const canonicalString = JSON.stringify(fetchedData.payload); // 단순화된 canonicalization
-    const sha256 = createHash('sha256').update(canonicalString).digest('hex');
+    const sha256 = computeHash(fetchedData.payload, 'sha256');
 
     await prisma.dataIntegrityLog.create({
       data: {
@@ -89,6 +88,7 @@ export async function processIngestionTask(taskId: string) {
     });
 
     console.log(`[Ingestion] Task ${taskId} completed successfully.`);
+    return rawArchive.id;
 
   } catch (error: any) {
     // 실패 처리 및 DLQ 로직 (간소화)
