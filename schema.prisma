@@ -111,6 +111,12 @@ model FinancialAccount {
   ticker              String
   fiscalYear          Int      @map("fiscal_year")
   fiscalQuarter       Int?     @map("fiscal_quarter")
+
+  // [추가] 명세서 요구사항 반영: 연결(CFS)/개별(OFS) 및 보고서 출처 구분
+  fsDiv               String   @default("CFS") @map("fs_div") // CFS or OFS
+  reportCode          String?  @map("report_code") // 11011(사업), 11013(1분기) 등 우선순위 판단용
+
+  statementType       String   @map("statement_type") // IS/BS/CF/CIS
   statementType       String   @map("statement_type") // IS/BS/CF
   standardAccountCode String   @map("standard_account_code")
   standardAccountName String   @map("standard_account_name")
@@ -125,6 +131,7 @@ model FinancialAccount {
   standardAccount  StandardTaxonomy @relation(fields: [standardAccountCode], references: [accountCode])
 
   @@map("financial_accounts")
+  @@index([ticker, fiscalYear, fsDiv, statementType])
 }
 
 // 6.7 Taxonomy & Mapping
@@ -216,6 +223,9 @@ model ModelOutput {
   scenario Scenario @relation(fields: [scenarioId], references: [id])
 
   @@map("model_outputs")
+
+  // [추가] 모델 생성 시 사용된 옵션 기록 (명세서 7.2.C)
+  metaData      Json?    @map("meta_data")
 }
 
 // 7. Lifecycle Management
