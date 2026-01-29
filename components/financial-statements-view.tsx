@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { Loader2, FileText, TrendingUp, DollarSign } from "lucide-react";
+import { Loader2, FileText, TrendingUp, DollarSign, DownloadCloud } from "lucide-react";
 
 interface FinancialAccount {
   id: string;
@@ -26,6 +26,7 @@ export default function FinancialStatementsView({ ticker }: { ticker: string }) 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"IS" | "BS" | "CF">("IS");
+  const [ingesting, setIngesting] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -35,6 +36,13 @@ export default function FinancialStatementsView({ ticker }: { ticker: string }) 
         const res = await fetch(
           `/api/financials/3st?ticker=${encodeURIComponent(ticker)}&year=${year}`
         );
+
+        // 404는 에러가 아니라 '데이터 없음'으로 처리하여 안내 UI를 표시
+        if (res.status === 404) {
+          setData(null);
+          return;
+        }
+
         if (!res.ok) {
           let message = `${res.status} ${res.statusText}`;
           const contentType = res.headers.get("content-type") || "";
@@ -63,6 +71,32 @@ export default function FinancialStatementsView({ ticker }: { ticker: string }) 
     }
     fetchData();
   }, [ticker, year]);
+
+  const handleIngest = async () => {
+    setIngesting(true);
+    try {
+      const res = await fetch("/api/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker, year }),
+      });
+
+      if (!res.ok) {
+        const json = await res.json();
+        throw new Error(json.error || "Ingestion failed");
+      }
+
+      // 수집 성공 후 데이터 재조회 (새로고침 효과)
+      // 간단히 year를 다시 설정하여 useEffect 트리거
+      const currentYear = year;
+      setYear(0); 
+      setTimeout(() => setYear(currentYear), 50);
+    } catch (err: any) {
+      alert(`Failed to ingest data: ${err.message}`);
+    } finally {
+      setIngesting(false);
+    }
+  };
 
   const formatNumber = (val: string) => {
     const num = parseFloat(val);
@@ -136,6 +170,14 @@ export default function FinancialStatementsView({ ticker }: { ticker: string }) 
           <div className="flex flex-col items-center justify-center h-[400px] text-muted-foreground">
             <p>No data available for {year}.</p>
             <p className="text-sm mt-1">Try running ingestion for this period.</p>
+            <button
+              onClick={handleIngest}
+              disabled={ingesting}
+              className="mt-4 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            >
+              {ingesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <DownloadCloud className="w-4 h-4" />}
+              {ingesting ? "Ingesting from DART..." : "Ingest Data from DART"}
+            </button>
           </div>
         ) : (
           <div className="overflow-x-auto">
