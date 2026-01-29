@@ -1,7 +1,6 @@
-# Project Stellar-Alpha (스텔라-알파) — Institutional-grade Financial Modeling Platform
-Master Program Specification (Consolidated + Expanded)
-Version: v2.3+ (Spec Rebuild / Engineering Super-Detail)
-Last Updated: 2026-01 (KST / Asia-Seoul)
+# Project Financial Modeling Web Platform
+Master Program Specification
+Last Updated: 2026-01-29, 16:00 (KST / Asia-Seoul)
 
 ───────────────────────────────────────────────────────────────────────────────
 0. 프로젝트 비전 / 철학
@@ -31,7 +30,7 @@ Last Updated: 2026-01 (KST / Asia-Seoul)
 - L3 Model Layer (사용자별 가정/시나리오/버전 관리 기반 모델링 결과)
 
 [데이터 흐름]
-External Providers (OpenDART API, KRX web/price, Reports HTML/PDF)
+External Providers (OpenDART API, KRX OpenAPI)
    → Ingestion Scheduler/Queue
       → Raw Archive Storage (JSONB/HTML/BLOB + Hash + Audit logs)
          → Meta Index / Normalization
