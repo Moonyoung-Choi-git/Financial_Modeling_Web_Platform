@@ -105,7 +105,7 @@ export default function FinancialStatementsView({ data, years }: ViewProps) {
                   No data available for this view.
                   <br />
                   <span className="text-xs text-gray-400">
-                    Try running the ingestion task first.
+                    Auto-ingestion may have failed or no data exists for these years.
                   </span>
                 </td>
               </tr>

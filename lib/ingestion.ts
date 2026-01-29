@@ -134,7 +134,8 @@ export async function processIngestionTask(taskId: string) {
 export async function createFinancialStatementTask(
   ticker: string,
   year: number,
-  reportCode: string = '11011' // 11011: 사업보고서, 11012: 반기, 11013: 1분기, 11014: 3분기
+  reportCode: string = '11011', // 11011: 사업보고서, 11012: 반기, 11013: 1분기, 11014: 3분기
+  fsDiv: 'CFS' | 'OFS' = 'CFS' // CFS: 연결, OFS: 개별
 ) {
   // 1. CorpCode 조회
   const corpInfo = await prisma.corpCode.findFirst({
@@ -151,7 +152,7 @@ export async function createFinancialStatementTask(
     corp_code: corpInfo.code,
     bsns_year: year.toString(),
     reprt_code: reportCode,
-    fs_div: 'CFS', // 연결재무제표 (Consolidated)
+    fs_div: fsDiv, // 연결재무제표(CFS) 우선, 필요 시 개별(OFS)
     
     // 내부 메타데이터용 (processIngestionTask에서 사용)
     ticker: ticker,

@@ -117,7 +117,6 @@ model FinancialAccount {
   reportCode          String?  @map("report_code") // 11011(사업), 11013(1분기) 등 우선순위 판단용
 
   statementType       String   @map("statement_type") // IS/BS/CF/CIS
-  statementType       String   @map("statement_type") // IS/BS/CF
   standardAccountCode String   @map("standard_account_code")
   standardAccountName String   @map("standard_account_name")
   reportedAccountName String   @map("reported_account_name")
