@@ -94,6 +94,9 @@ export async function refineFinancialData(rawArchiveId: string) {
   // 4. DB 저장 (Batch Insert)
   if (refinedAccounts.length > 0) {
     // L2 데이터는 재생성 가능하므로, 중복 방지를 위해 기존 데이터 삭제 후 삽입하거나 createMany 사용
+    await prisma.financialAccount.deleteMany({
+      where: { sourceRawArchiveId: archive.id },
+    });
     await prisma.financialAccount.createMany({
       data: refinedAccounts,
     });

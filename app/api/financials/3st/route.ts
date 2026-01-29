@@ -1,8 +1,18 @@
 import { NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import prisma from '@/lib/db';
+import { refineFinancialData } from '@/lib/refinement';
 
 export const dynamic = 'force-dynamic';
+
+const isMissingTableError = (error: unknown) => {
+  const err = error as { code?: string; message?: string };
+  return (
+    err?.code === 'P2021' ||
+    (typeof err?.message === 'string' &&
+      err.message.includes('does not exist'))
+  );
+};
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -44,15 +54,42 @@ export async function GET(request: Request) {
       where.fiscalQuarter = fiscalQuarter;
     }
 
-    const accounts = await prisma.financialAccount.findMany({
+    const findOptions = {
       where,
       include: {
         standardAccount: true,
       },
       orderBy: {
-        standardAccountCode: 'asc',
+        standardAccountCode: 'asc' as const,
       },
-    });
+    };
+
+    let accounts = await prisma.financialAccount.findMany(findOptions);
+
+    if (accounts.length === 0) {
+      const rawWhere: {
+        ticker: string;
+        fiscalYear: number;
+        fiscalQuarter?: number;
+      } = {
+        ticker,
+        fiscalYear,
+      };
+      if (fiscalQuarter !== undefined) {
+        rawWhere.fiscalQuarter = fiscalQuarter;
+      }
+
+      const latestRaw = await prisma.sourceRawMetaIndex.findFirst({
+        where: rawWhere,
+        orderBy: { createdAt: 'desc' },
+        select: { rawArchiveId: true },
+      });
+
+      if (latestRaw?.rawArchiveId) {
+        await refineFinancialData(latestRaw.rawArchiveId);
+        accounts = await prisma.financialAccount.findMany(findOptions);
+      }
+    }
 
     return NextResponse.json({
       IS: accounts.filter((a) => a.statementType === 'IS'),
@@ -61,8 +98,9 @@ export async function GET(request: Request) {
     });
   } catch (error: any) {
     if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2021'
+      (error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2021') ||
+      isMissingTableError(error)
     ) {
       return NextResponse.json(
         {
