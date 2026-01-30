@@ -291,7 +291,50 @@ const worker = new Worker(
         case 'RestatementMonitorJob': {
           console.log('[Worker] 🔍 Checking for restatements...');
 
-          // TODO: Implement restatement monitoring (Section 2.6)
+          const { detectRestatements, recordRestatement, assessRestatementImpact, autoRebuildAffectedModels } =
+            await import('./lib/quality');
+
+          const { corpCode, fiscalYear, sinceDays = 7 } = job.data;
+
+          const sinceDate = new Date();
+          sinceDate.setDate(sinceDate.getDate() - sinceDays);
+
+          // Detect restatements
+          const restatements = await detectRestatements({
+            corpCode,
+            fiscalYear,
+            sinceDate,
+          });
+
+          console.log(`[Worker] Found ${restatements.length} restatements`);
+
+          // Process each restatement
+          const processed: string[] = [];
+          for (const event of restatements) {
+            // Record to tracker table
+            await recordRestatement(event);
+
+            // Assess impact
+            const impact = await assessRestatementImpact(event);
+
+            console.log(
+              `[Worker] Restatement ${event.corpCode} FY${event.fiscalYear}: ` +
+                `Impact ${event.impactScore}, Snapshots affected: ${impact.snapshotsAffected.length}`
+            );
+
+            // Auto-rebuild if recommended
+            if (impact.autoRebuildRecommended) {
+              const rebuilt = await autoRebuildAffectedModels(event);
+              console.log(`[Worker] Auto-rebuilt ${rebuilt.length} models`);
+            }
+
+            processed.push(event.id);
+          }
+
+          return {
+            restarementsDetected: restatements.length,
+            processed,
+          };
           console.log('[Worker] ⚠️  Restatement monitoring not yet implemented');
           return { status: 'NOT_IMPLEMENTED' };
         }
