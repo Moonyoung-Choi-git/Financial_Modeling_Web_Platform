@@ -69,10 +69,15 @@ async function triggerAutoIngestion(ticker: string, years: number[]) {
 export default async function FinancialsPage({ params }: PageProps) {
   const { ticker } = await params;
   
-  // 현재 연도 기준 최근 3년치 데이터 모델링 요청
+  // 기준 연도: DB에 데이터가 있으면 가장 최신 연도, 없으면 직전 연도
   // (실제 운영 시에는 DB 캐시를 먼저 조회하고 없으면 생성하는 로직 권장)
   const currentYear = new Date().getFullYear();
-  const years = [currentYear - 3, currentYear - 2, currentYear - 1];
+  const latestYear = await prisma.financialAccount.aggregate({
+    where: { ticker },
+    _max: { fiscalYear: true },
+  });
+  const anchorYear = latestYear._max.fiscalYear ?? currentYear - 1;
+  const years = Array.from({ length: 5 }, (_, i) => anchorYear - 4 + i);
   
   let modelData = {};
   let error = null;
@@ -107,12 +112,15 @@ export default async function FinancialsPage({ params }: PageProps) {
       if (!error) error = retryError?.message || 'Auto-ingestion failed';
     }
   }
-  // 실제 데이터가 있는 연도만 화면에 노출
+  // 실제 데이터가 있는 연도를 기준으로 5개 연도 범위 표시
   const availableYears = Object.keys(modelData)
     .map((y) => parseInt(y, 10))
     .filter((y) => Number.isFinite(y))
     .sort((a, b) => a - b);
-  const yearsToDisplay = availableYears.length > 0 ? availableYears : years;
+  const displayAnchor = availableYears.length > 0
+    ? Math.max(...availableYears)
+    : anchorYear;
+  const yearsToDisplay = Array.from({ length: 5 }, (_, i) => displayAnchor - 4 + i);
 
   return (
     <div className="container mx-auto py-8 px-4">

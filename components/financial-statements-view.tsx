@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { cn } from '@/lib/utils'; 
+import IncomeStatementTable from '@/components/income-statement-table';
 
 interface ViewProps {
   data: any;
@@ -46,73 +47,76 @@ export default function FinancialStatementsView({ data, years }: ViewProps) {
         ))}
       </div>
 
-      {/* 데이터 테이블 */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm text-left border-collapse">
-          <thead className="bg-gray-50 text-gray-700 uppercase">
-            <tr>
-              <th className="px-6 py-3 border-b">Account</th>
-              {years.map(year => (
-                <th key={year} className="px-6 py-3 text-right border-b">
-                  {year}
-                  {/* 해당 연도의 데이터 출처(연결/개별) 표시 */}
-                  <div className="text-[10px] text-gray-400 font-normal normal-case">
-                    {data[year]?.meta?.fsDiv || '-'}
-                  </div>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sortedCodes.map((code) => {
-              // 계정 이름은 가장 최신 연도의 데이터를 우선 사용
-              // (과거 연도에는 없고 최신 연도에만 있는 계정일 수도 있음)
-              let accountName = code;
-              for (let i = years.length - 1; i >= 0; i--) {
-                const item = data[years[i]]?.[activeTab]?.[code];
-                if (item?.name) {
-                  accountName = item.name;
-                  break;
-                }
-              }
-
-              return (
-                <tr key={code} className="border-b hover:bg-gray-50 last:border-0">
-                  <td className="px-6 py-3 font-medium text-gray-900">
-                    {accountName}
-                    {/* 표준 코드가 아닌 경우 원본 계정명 표기 (디버깅용) */}
-                    <div className="text-xs text-gray-400 font-normal truncate max-w-[200px]">
-                      {code}
-                    </div>
-                  </td>
-                  {years.map(year => {
-                    const cell = data[year]?.[activeTab]?.[code];
-                    return (
-                      <td key={year} className="px-6 py-3 text-right font-mono text-gray-700">
-                        {cell?.value !== undefined
-                          ? cell.value.toLocaleString() 
-                          : '-'}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-            
-            {sortedCodes.length === 0 && (
+      {activeTab === 'IS' ? (
+        <IncomeStatementTable data={data} years={years} />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left border-collapse">
+            <thead className="bg-gray-50 text-gray-700 uppercase">
               <tr>
-                <td colSpan={years.length + 1} className="px-6 py-12 text-center text-gray-500">
-                  No data available for this view.
-                  <br />
-                  <span className="text-xs text-gray-400">
-                    Auto-ingestion may have failed or no data exists for these years.
-                  </span>
-                </td>
+                <th className="px-6 py-3 border-b">Account</th>
+                {years.map(year => (
+                  <th key={year} className="px-6 py-3 text-right border-b">
+                    {year}
+                    {/* 해당 연도의 데이터 출처(연결/개별) 표시 */}
+                    <div className="text-[10px] text-gray-400 font-normal normal-case">
+                      {data[year]?.meta?.fsDiv || '-'}
+                    </div>
+                  </th>
+                ))}
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {sortedCodes.map((code) => {
+                // 계정 이름은 가장 최신 연도의 데이터를 우선 사용
+                // (과거 연도에는 없고 최신 연도에만 있는 계정일 수도 있음)
+                let accountName = code;
+                for (let i = years.length - 1; i >= 0; i--) {
+                  const item = data[years[i]]?.[activeTab]?.[code];
+                  if (item?.name) {
+                    accountName = item.name;
+                    break;
+                  }
+                }
+
+                return (
+                  <tr key={code} className="border-b hover:bg-gray-50 last:border-0">
+                    <td className="px-6 py-3 font-medium text-gray-900">
+                      {accountName}
+                      {/* 표준 코드가 아닌 경우 원본 계정명 표기 (디버깅용) */}
+                      <div className="text-xs text-gray-400 font-normal truncate max-w-[200px]">
+                        {code}
+                      </div>
+                    </td>
+                    {years.map(year => {
+                      const cell = data[year]?.[activeTab]?.[code];
+                      return (
+                        <td key={year} className="px-6 py-3 text-right font-mono text-gray-700">
+                          {cell?.value !== undefined
+                            ? cell.value.toLocaleString() 
+                            : '-'}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+              
+              {sortedCodes.length === 0 && (
+                <tr>
+                  <td colSpan={years.length + 1} className="px-6 py-12 text-center text-gray-500">
+                    No data available for this view.
+                    <br />
+                    <span className="text-xs text-gray-400">
+                      Auto-ingestion may have failed or no data exists for these years.
+                    </span>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
