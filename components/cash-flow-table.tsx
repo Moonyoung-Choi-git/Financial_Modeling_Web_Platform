@@ -10,15 +10,15 @@ const DELTA_AR_CODES = ['CF.DELTA_AR', '매출채권의 감소(증가)', '매출
 const DELTA_INV_CODES = ['CF.DELTA_INV', '재고자산의 감소(증가)', '재고자산 증감'];
 const DELTA_AP_CODES = ['CF.DELTA_AP', '매입채무의 증가(감소)', '매입채무 증감'];
 const DELTA_OTHER_WC_CODES = ['CF.DELTA_OTHER_WC', '기타운전자본 증감', '기타운전자본의 감소(증가)'];
-const INTEREST_PAID_CODES = ['이자지급', '이자지급액', '이자지급현금'];
-const INTEREST_RECEIVED_CODES = ['이자수취', '이자수취액', '이자수취현금'];
-const TAX_PAID_CODES = ['법인세 납부', '법인세의 납부', '법인세 납부액'];
+const INTEREST_PAID_CODES = ['CF.INTEREST_PAID', '이자지급', '이자지급액', '이자지급현금'];
+const INTEREST_RECEIVED_CODES = ['CF.INTEREST_RECEIVED', '이자수취', '이자수취액', '이자수취현금'];
+const TAX_PAID_CODES = ['CF.TAXES_PAID', '법인세 납부', '법인세의 납부', '법인세 납부액'];
 const CFO_CODES = ['CF.CFO', '영업활동현금흐름', '영업활동으로인한현금흐름'];
 
 const CAPEX_CODES = ['CF.CAPEX', '유형자산의 취득', '유형자산 취득'];
 const INTANG_CAPEX_CODES = ['CF.INTANG_CAPEX', '무형자산의 취득', '무형자산 취득'];
-const INVEST_PURCHASE_CODES = ['투자자산의 취득', '금융상품의 취득'];
-const INVEST_DISPOSAL_CODES = ['투자자산의 처분', '금융상품의 처분'];
+const INVEST_PURCHASE_CODES = ['CF.INVEST_PURCHASE', '투자자산의 취득', '금융상품의 취득'];
+const INVEST_DISPOSAL_CODES = ['CF.INVEST_DISPOSAL', '투자자산의 처분', '금융상품의 처분'];
 const OTHER_INVEST_CODES = ['CF.OTHER_INVESTING', '기타투자활동'];
 const CFI_CODES = ['CF.CFI', '투자활동현금흐름', '투자활동으로인한현금흐름'];
 

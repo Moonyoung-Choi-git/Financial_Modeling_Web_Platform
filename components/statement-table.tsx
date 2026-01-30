@@ -74,6 +74,12 @@ const HEADER_TONES: Record<StatementType, string> = {
   CF: 'border-blue-700 bg-blue-600 text-white',
 };
 
+const normalizeKey = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[()·.,/-]/g, '');
+
 const collectCodes = (rows: RowDef[], set: Set<string>) => {
   rows.forEach((row) => {
     row.codes?.forEach((code) => set.add(code));
@@ -144,19 +150,33 @@ export default function StatementTable({
   const lookups = useMemo(() => {
     const map = new Map<
       number,
-      { byCode: StatementData; byName: Map<string, StatementItem> }
+      {
+        byCode: StatementData;
+        byName: Map<string, StatementItem>;
+        byNormalizedName: Map<string, StatementItem>;
+      }
     >();
 
     years.forEach((year) => {
       const statement = data?.[year]?.[statementType] || {};
       const byName = new Map<string, StatementItem>();
+      const byNormalizedName = new Map<string, StatementItem>();
+      const addName = (name: string | undefined, item: StatementItem) => {
+        if (!name) return;
+        byName.set(name, item);
+        const normalized = normalizeKey(name);
+        if (normalized && !byNormalizedName.has(normalized)) {
+          byNormalizedName.set(normalized, item);
+        }
+      };
       Object.values(statement).forEach((item) => {
-        if (item?.name) byName.set(item.name, item);
-        if (item?.reportedName && item.reportedName !== item.name) {
-          byName.set(item.reportedName, item);
+        if (!item) return;
+        addName(item.name, item);
+        if (item.reportedName && item.reportedName !== item.name) {
+          addName(item.reportedName, item);
         }
       });
-      map.set(year, { byCode: statement, byName });
+      map.set(year, { byCode: statement, byName, byNormalizedName });
     });
 
     return map;
@@ -169,7 +189,9 @@ export default function StatementTable({
       const entry = lookups.get(year);
       if (!entry) return null;
       if (entry.byCode?.[code]) return entry.byCode[code];
-      return entry.byName.get(code) || null;
+      if (entry.byName.has(code)) return entry.byName.get(code) || null;
+      const normalized = normalizeKey(code);
+      return entry.byNormalizedName.get(normalized) || null;
     };
 
     const valueOf = (codes: string | string[], year: number) => {
@@ -208,6 +230,12 @@ export default function StatementTable({
     collectCodes(rows, set);
     return set;
   }, [rows]);
+
+  const normalizedCodes = useMemo(() => {
+    const set = new Set<string>();
+    allCodes.forEach((code) => set.add(normalizeKey(code)));
+    return set;
+  }, [allCodes]);
 
   const defaultExpanded = useMemo(() => {
     const expanded: Record<string, boolean> = {};
@@ -249,9 +277,15 @@ export default function StatementTable({
         if (!statement) return;
         Object.keys(statement).forEach((code) => {
           const item = statement[code];
-          if (allCodes.has(code)) return;
-          if (item?.name && allCodes.has(item.name)) return;
-          if (item?.reportedName && allCodes.has(item.reportedName)) return;
+          if (allCodes.has(code) || normalizedCodes.has(normalizeKey(code))) return;
+          if (item?.name && (allCodes.has(item.name) || normalizedCodes.has(normalizeKey(item.name)))) return;
+          if (
+            item?.reportedName &&
+            (allCodes.has(item.reportedName) ||
+              normalizedCodes.has(normalizeKey(item.reportedName)))
+          ) {
+            return;
+          }
           unmappedCodes.add(code);
         });
       });
@@ -278,7 +312,7 @@ export default function StatementTable({
     }
 
     return output;
-  }, [rows, expanded, showRatios, showUnmapped, data, years, statementType, allCodes]);
+  }, [rows, expanded, showRatios, showUnmapped, data, years, statementType, allCodes, normalizedCodes]);
 
   const getRowValue = (row: RowDef, year: number) => {
     if (row.compute) return row.compute(year, ctx);

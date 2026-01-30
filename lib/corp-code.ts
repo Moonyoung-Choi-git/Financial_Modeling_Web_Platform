@@ -8,6 +8,7 @@ interface CorpCodeXmlItem {
   corp_name: string[];
   corp_eng_name?: string[];
   stock_code: string[];
+  corp_cls?: string[];
   modify_date: string[];
 }
 
@@ -44,11 +45,13 @@ export async function syncCorpCodes() {
   const corpCodes = list.map((item) => {
     const stockCode = item.stock_code[0].trim();
     const corpEngName = item.corp_eng_name?.[0]?.trim();
+    const corpCls = item.corp_cls?.[0]?.trim();
     return {
       corpCode: item.corp_code[0],
       corpName: item.corp_name[0],
       corpEngName: corpEngName || null,
       stockCode: stockCode === '' ? null : stockCode, // 비상장 기업은 null 처리
+      corpCls: corpCls || null,
       modifyDate: item.modify_date[0],
     };
   });

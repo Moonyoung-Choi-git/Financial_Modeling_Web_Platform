@@ -79,6 +79,7 @@ model RawDartCorpMaster {
   stockCode   String?  @map("stock_code") @db.Char(6) // 비상장은 null
   corpName    String   @map("corp_name")
   corpEngName String?  @map("corp_eng_name")
+  corpCls     String?  @map("corp_cls") @db.Char(1) // KOSPI/KOSDAQ/KONEX/ETC
   modifyDate  String   @map("modify_date") // YYYYMMDD
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
 
@@ -89,6 +90,7 @@ model RawDartCorpMaster {
 
   @@index([stockCode])
   @@index([corpName])
+  @@index([corpCls])
   @@map("raw_dart_corp_master")
 }
 

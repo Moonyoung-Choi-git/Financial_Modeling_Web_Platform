@@ -390,10 +390,10 @@ let dartClientInstance: DartClient | null = null;
 
 export function getDartClient(): DartClient {
   if (!dartClientInstance) {
-    const apiKey = process.env.DART_CRTFC_KEY;
+    const apiKey = (process.env.DART_CRTFC_KEY || process.env.OPENDART_API_KEY || '').trim();
 
     if (!apiKey) {
-      throw new Error('[DART Client] DART_CRTFC_KEY environment variable is not set');
+      throw new Error('[DART Client] DART_CRTFC_KEY (or OPENDART_API_KEY) environment variable is not set');
     }
 
     dartClientInstance = new DartClient({

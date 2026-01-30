@@ -3,26 +3,26 @@
 import StatementTable, { ComputeCtx, RowDef, StatementYearData } from '@/components/statement-table';
 
 const CASH_CODES = ['BS.CASH', '현금및현금성자산', '현금및현금등가물'];
-const ST_FIN_ASSET_CODES = ['단기금융자산', '단기금융상품'];
+const ST_FIN_ASSET_CODES = ['BS.ST_FIN_ASSETS', '단기금융자산', '단기금융상품'];
 const AR_CODES = ['BS.AR', '매출채권', '매출채권및기타채권'];
-const OTHER_REC_CODES = ['기타채권', '기타수취채권', '기타유동채권'];
+const OTHER_REC_CODES = ['BS.OTHER_REC', '기타채권', '기타수취채권', '기타유동채권'];
 const INVENTORY_CODES = ['BS.INVENTORY', '재고자산'];
-const PREPAID_CODES = ['선급비용', '선급금'];
+const PREPAID_CODES = ['BS.PREPAID', '선급비용', '선급금'];
 const OTHER_CA_CODES = ['BS.OTHER_CA', '기타유동자산'];
 const TOTAL_CA_CODES = ['BS.TOTAL_CA', '유동자산'];
 
-const LT_FIN_ASSET_CODES = ['장기금융자산', '장기금융상품'];
-const INVEST_ASSOC_CODES = ['관계기업투자', '관계기업및공동기업투자'];
-const INVEST_PROPERTY_CODES = ['투자부동산'];
+const LT_FIN_ASSET_CODES = ['BS.LT_FIN_ASSETS', '장기금융자산', '장기금융상품'];
+const INVEST_ASSOC_CODES = ['BS.INVEST_ASSOC', '관계기업투자', '관계기업및공동기업투자'];
+const INVEST_PROPERTY_CODES = ['BS.INVEST_PROP', '투자부동산'];
 const PPE_GROSS_CODES = ['BS.PPE_GROSS', '유형자산(총액)'];
 const ACC_DEP_CODES = ['BS.ACCUMULATED_DEP', '감가상각누계액'];
 const PPE_NET_CODES = ['BS.PPE_NET', '유형자산', '유형자산(순액)'];
-const ROU_ASSET_CODES = ['사용권자산'];
+const ROU_ASSET_CODES = ['BS.ROU_ASSET', '사용권자산'];
 const INTANGIBLE_CODES = ['BS.INTANGIBLES', '무형자산'];
-const DEFERRED_TAX_ASSET_CODES = ['이연법인세자산'];
+const DEFERRED_TAX_ASSET_CODES = ['BS.DTA', '이연법인세자산'];
 const OTHER_NCA_CODES = ['BS.OTHER_NCA', '기타비유동자산'];
 const TOTAL_ASSETS_CODES = ['BS.TOTAL_ASSETS', '자산총계'];
-const TOTAL_NCA_CODES = ['비유동자산'];
+const TOTAL_NCA_CODES = ['BS.TOTAL_NCA', '비유동자산'];
 
 const AP_CODES = ['BS.AP', '매입채무', '매입채무및기타채무'];
 const OTHER_CL_CODES = ['BS.OTHER_CL', '기타유동부채'];
@@ -33,19 +33,19 @@ const TOTAL_CL_CODES = ['BS.TOTAL_CL', '유동부채'];
 const LONG_DEBT_CODES = ['BS.LONG_DEBT', '장기차입금'];
 const BONDS_CODES = ['BS.BONDS', '사채'];
 const LEASE_LIAB_CODES = ['BS.LEASE_LIAB', '리스부채'];
-const DEFERRED_TAX_LIAB_CODES = ['이연법인세부채'];
-const PROVISION_CODES = ['충당부채'];
+const DEFERRED_TAX_LIAB_CODES = ['BS.DTL', '이연법인세부채'];
+const PROVISION_CODES = ['BS.PROVISIONS', '충당부채'];
 const OTHER_NCL_CODES = ['BS.OTHER_NCL', '기타비유동부채'];
-const TOTAL_NCL_CODES = ['비유동부채'];
+const TOTAL_NCL_CODES = ['BS.TOTAL_NCL', '비유동부채'];
 const TOTAL_LIAB_CODES = ['BS.TOTAL_LIABILITIES', '부채총계'];
 
 const COMMON_STOCK_CODES = ['BS.COMMON_STOCK', '자본금'];
 const APIC_CODES = ['BS.APIC', '주식발행초과금'];
-const OTHER_EQUITY_CODES = ['기타자본', '자본잉여금', '기타자본잉여금'];
+const OTHER_EQUITY_CODES = ['BS.OTHER_EQUITY', '기타자본', '자본잉여금', '기타자본잉여금'];
 const RETAINED_EARNINGS_CODES = ['BS.RETAINED_EARNINGS', '이익잉여금', '이익잉여금(결손금)'];
 const OCI_CODES = ['BS.OCI', '기타포괄손익누계액'];
 const TREASURY_STOCK_CODES = ['BS.TREASURY_STOCK', '자기주식'];
-const NCI_CODES = ['비지배지분'];
+const NCI_CODES = ['BS.NCI', '비지배지분'];
 const TOTAL_EQUITY_CODES = ['BS.TOTAL_EQUITY', '자본총계'];
 
 const sumFirstAvailable = (year: number, ctx: ComputeCtx, groups: string[][]) => {

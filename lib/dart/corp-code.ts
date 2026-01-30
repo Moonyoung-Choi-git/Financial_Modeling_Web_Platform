@@ -77,6 +77,7 @@ export async function syncCorpCodes(): Promise<{
         const corpCode = item.corp_code;
         const stockCode = item.stock_code?.trim() || null;
         const modifyDate = item.modify_date;
+        const corpCls = item.corp_cls?.trim() || null;
 
         // Check if exists
         const existing = await prisma.rawDartCorpMaster.findUnique({
@@ -84,14 +85,21 @@ export async function syncCorpCodes(): Promise<{
         });
 
         if (existing) {
-          // Update only if modify_date changed
-          if (existing.modifyDate !== modifyDate) {
+          const shouldUpdate =
+            existing.modifyDate !== modifyDate ||
+            existing.corpCls !== corpCls ||
+            existing.corpName !== item.corp_name ||
+            existing.corpEngName !== (item.corp_eng_name || null) ||
+            existing.stockCode !== (stockCode?.length === 6 ? stockCode : null);
+
+          if (shouldUpdate) {
             await prisma.rawDartCorpMaster.update({
               where: { corpCode },
               data: {
                 stockCode: stockCode?.length === 6 ? stockCode : null,
                 corpName: item.corp_name,
                 corpEngName: item.corp_eng_name || null,
+                corpCls,
                 modifyDate,
               },
             });
@@ -100,15 +108,16 @@ export async function syncCorpCodes(): Promise<{
         } else {
           // Insert new
           await prisma.rawDartCorpMaster.create({
-            data: {
-              corpCode,
-              stockCode: stockCode?.length === 6 ? stockCode : null,
-              corpName: item.corp_name,
-              corpEngName: item.corp_eng_name || null,
-              modifyDate,
-            },
-          });
-          stats.added++;
+              data: {
+                corpCode,
+                stockCode: stockCode?.length === 6 ? stockCode : null,
+                corpName: item.corp_name,
+                corpEngName: item.corp_eng_name || null,
+                corpCls,
+                modifyDate,
+              },
+            });
+            stats.added++;
         }
       } catch (error: any) {
         console.error(`[DART CorpCode] Error processing ${item.corp_code}: ${error.message}`);
@@ -167,6 +176,7 @@ export async function searchCorpByName(corpName: string): Promise<CorpCodeItem[]
     corp_code: c.corpCode,
     corp_name: c.corpName,
     stock_code: c.stockCode || undefined,
+    corp_cls: c.corpCls || undefined,
     modify_date: c.modifyDate,
   }));
 }

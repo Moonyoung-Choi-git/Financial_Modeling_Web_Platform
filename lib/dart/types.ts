@@ -160,6 +160,7 @@ export interface CorpCodeItem {
   corp_code: string;
   corp_name: string;
   stock_code?: string;
+  corp_cls?: string;
   modify_date: string; // YYYYMMDD
 }
 

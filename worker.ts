@@ -44,8 +44,8 @@ const queue = new Queue(QUEUE_NAME, { connection: redis });
 // Environment Check (명세서 Section 2.1)
 // ============================================================================
 
-if (!process.env.DART_CRTFC_KEY) {
-  console.warn('[Worker] ⚠️  WARNING: DART_CRTFC_KEY is not set. DART API calls will fail.');
+if (!process.env.DART_CRTFC_KEY && !process.env.OPENDART_API_KEY) {
+  console.warn('[Worker] ⚠️  WARNING: DART_CRTFC_KEY or OPENDART_API_KEY is not set. DART API calls will fail.');
 }
 
 // ============================================================================
