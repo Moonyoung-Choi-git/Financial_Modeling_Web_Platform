@@ -1,0 +1,103 @@
+name: Weekly DART Data Update
+
+on:
+  schedule:
+    # Every Sunday at 2 AM UTC (11 AM KST)
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    # Allow manual trigger from GitHub Actions UI
+    inputs:
+      include_prev_year:
+        description: 'Include previous year data'
+        required: false
+        default: 'false'
+        type: boolean
+      market:
+        description: 'Market filter (ALL, KOSPI, KOSDAQ)'
+        required: false
+        default: 'ALL'
+        type: choice
+        options:
+          - ALL
+          - KOSPI
+          - KOSDAQ
+
+jobs:
+  update:
+    name: Update DART Financial Data
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours max
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run db:generate
+
+      - name: Run weekly update
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.include_prev_year }}" = "true" ]; then
+            ARGS="$ARGS --include-prev"
+          fi
+          if [ "${{ github.event.inputs.market }}" != "" ] && [ "${{ github.event.inputs.market }}" != "ALL" ]; then
+            ARGS="$ARGS --market ${{ github.event.inputs.market }}"
+          fi
+          npm run ingest:weekly -- $ARGS
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DART_CRTFC_KEY: ${{ secrets.DART_CRTFC_KEY }}
+          OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+
+      - name: Run curation
+        run: npm run ingest:curate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Post update summary
+        run: |
+          echo "## Weekly DART Data Update Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Update completed successfully." >> $GITHUB_STEP_SUMMARY
+
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: update
+    if: failure()
+
+    steps:
+      - name: Create failure issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `Weekly DART Update Failed - ${new Date().toISOString().split('T')[0]}`;
+            const body = `
+            ## Weekly DART Data Update Failed
+
+            **Workflow Run:** [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            **Date:** ${new Date().toISOString()}
+
+            Please check the workflow logs for details.
+            `;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['bug', 'automated']
+            });

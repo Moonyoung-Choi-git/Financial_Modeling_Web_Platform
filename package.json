@@ -13,7 +13,12 @@
     "db:generate": "prisma generate --schema schema.prisma",
     "db:push": "prisma db push --schema schema.prisma",
     "db:migrate": "prisma migrate dev --name init --schema schema.prisma",
-    "db:seed": "prisma db seed --schema schema.prisma"
+    "db:seed": "prisma db seed --schema schema.prisma",
+    "ingest:corp-sync": "tsx scripts/sync-corp-codes.ts",
+    "ingest:bulk": "tsx scripts/bulk-ingest.ts",
+    "ingest:curate": "tsx scripts/bulk-curate.ts",
+    "ingest:weekly": "tsx scripts/weekly-update.ts",
+    "ingest:full": "npm run ingest:corp-sync && npm run ingest:bulk && npm run ingest:curate"
   },
   "dependencies": {
     "@prisma/client": "^6.19.2",

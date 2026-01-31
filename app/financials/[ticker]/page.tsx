@@ -3,7 +3,6 @@ import { ArrowLeft } from 'lucide-react';
 import prisma from '@/lib/db';
 import { buildThreeStatementModel } from '@/lib/modeling/builder';
 import FinancialStatementsView from '@/components/financial-statements-view';
-import { fetchFinancialAll, syncCorpCodesOnce } from '@/lib/dart';
 import { transformRawToCurated } from '@/lib/curate';
 
 interface PageProps {
@@ -124,7 +123,7 @@ async function resolveCorpIdentity(input: string, market?: string): Promise<Corp
 
   const marketHint = marketCls ? ' Try changing the market filter.' : '';
   return {
-    error: `Company not found in DART corp master.${marketHint} Verify the input or sync corp codes.`,
+    error: `Company not found in database.${marketHint} Data may not be loaded yet.`,
   };
 }
 
@@ -159,17 +158,10 @@ async function triggerAutoIngestion(params: {
 
           let hasData = !!hasRaw;
           if (!hasRaw) {
-            const result = await fetchFinancialAll({
-              corp_code: corpCode,
-              bsns_year: bsnsYear,
-              reprt_code: reportCode,
-              fs_div: fsDiv,
-            });
-
-            if (result.rowCount > 0) {
-              hasData = true;
-              didIngest = true;
-            }
+            // Data not pre-loaded - skip this combination
+            // All data should be pre-loaded via bulk ingestion
+            console.log(`[Auto-Ingest] No raw data for ${corpCode}/${bsnsYear}/${reportCode}/${fsDiv}`);
+            continue;
           }
 
           if (!hasData) continue;
@@ -240,15 +232,9 @@ export default async function FinancialsPage({ params, searchParams }: PageProps
     resolution = await resolveCorpIdentity(ticker);
   }
   if ('error' in resolution) {
-    try {
-      const corpCount = await prisma.rawDartCorpMaster.count();
-      if (corpCount === 0 || forceRefresh) {
-        await syncCorpCodesOnce({ force: true });
-        resolution = await resolveCorpIdentity(ticker, market);
-      }
-    } catch (syncError: any) {
-      error = syncError?.message || 'Failed to sync corp codes from DART.';
-    }
+    // Corp codes must be pre-loaded via bulk ingestion
+    // Do not auto-sync from DART API at runtime
+    // Use: npm run ingest:corp-sync
   }
 
   if (!error && 'error' in resolution) {
@@ -377,7 +363,7 @@ export default async function FinancialsPage({ params, searchParams }: PageProps
   }
 
   if (isEmptyModel && !error) {
-    error = `No financial data found for ${identifier}. Try a different report year or verify the corp code.`;
+    error = `No financial data available for ${identifier}. Financial data for this company may not be loaded in the database yet.`;
   }
 
   const availableYears = Object.keys(modelData)
