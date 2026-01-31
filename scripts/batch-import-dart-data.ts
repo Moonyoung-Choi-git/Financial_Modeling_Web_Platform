@@ -26,7 +26,7 @@ interface ImportOptions {
   market?: string;
   limit?: number;
   years?: number[];
-  skipExisting?: boolean;
+  skipExisting: boolean;
 }
 
 async function importCompanyData(
@@ -69,73 +69,15 @@ async function importCompanyData(
             fs_div: fsDiv,
           });
 
-          if (!response.list || response.list.length === 0) {
+          if (response.rowCount === 0) {
             console.log(`  ⊘ No data for ${year} ${reportCode} ${fsDiv}`);
             continue;
           }
 
-          // Store raw data
-          const rawRceptNo = response.list.find((item) => item.rcept_no)?.rcept_no || null;
-
-          for (const item of response.list) {
-            await prisma.rawDartFnlttAllRow.upsert({
-              where: {
-                corpCode_bsnsYear_reprtCode_fsDiv_sjDiv_accountId_accountNm_accountDetail_ord: {
-                  corpCode,
-                  bsnsYear,
-                  reprtCode: reportCode,
-                  fsDiv,
-                  sjDiv: item.sj_div || 'UNKNOWN',
-                  accountId: item.account_id || 'UNKNOWN',
-                  accountNm: item.account_nm,
-                  accountDetail: item.account_detail || '',
-                  ord: item.ord || '0',
-                },
-              },
-              update: {
-                sjNm: item.sj_nm,
-                thstrmNm: item.thstrm_nm,
-                thstrmAmount: item.thstrm_amount,
-                thstrmAddAmount: item.thstrm_add_amount,
-                frmtrmNm: item.frmtrm_nm,
-                frmtrmAmount: item.frmtrm_amount,
-                frmtrmAddAmount: item.frmtrm_add_amount,
-                frmtrmQNm: item.frmtrm_q_nm,
-                frmtrmQAmount: item.frmtrm_q_amount,
-                bfefrmtrmNm: item.bfefrmtrm_nm,
-                bfefrmtrmAmount: item.bfefrmtrm_amount,
-                currency: item.currency,
-                ...(rawRceptNo && { rceptNo: rawRceptNo }),
-              },
-              create: {
-                corpCode,
-                bsnsYear,
-                reprtCode: reportCode,
-                fsDiv,
-                sjDiv: item.sj_div || 'UNKNOWN',
-                sjNm: item.sj_nm,
-                accountId: item.account_id || 'UNKNOWN',
-                accountNm: item.account_nm,
-                accountDetail: item.account_detail || '',
-                thstrmNm: item.thstrm_nm,
-                thstrmAmount: item.thstrm_amount,
-                thstrmAddAmount: item.thstrm_add_amount,
-                frmtrmNm: item.frmtrm_nm,
-                frmtrmAmount: item.frmtrm_amount,
-                frmtrmAddAmount: item.frmtrm_add_amount,
-                frmtrmQNm: item.frmtrm_q_nm,
-                frmtrmQAmount: item.frmtrm_q_amount,
-                bfefrmtrmNm: item.bfefrmtrm_nm,
-                bfefrmtrmAmount: item.bfefrmtrm_amount,
-                currency: item.currency,
-                ord: item.ord || '0',
-                ...(rawRceptNo && { rceptNo: rawRceptNo }),
-              },
-            });
-          }
-
           totalImported++;
-          console.log(`  ✓ Imported ${response.list.length} rows for ${year} ${reportCode} ${fsDiv}`);
+          console.log(
+            `  ✓ Imported ${response.rowCount} rows for ${year} ${reportCode} ${fsDiv}`
+          );
 
           // Rate limiting - wait 200ms between requests
           await new Promise((resolve) => setTimeout(resolve, 200));
