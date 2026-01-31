@@ -3,6 +3,15 @@ import prisma from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
+function parseParamsCanonical(paramsCanonical: string) {
+  const params = new URLSearchParams(paramsCanonical);
+  const parsed: Record<string, string> = {};
+  params.forEach((value, key) => {
+    parsed[key] = value;
+  });
+  return parsed;
+}
+
 export async function GET(
   _request: NextRequest,
   context: { params: Promise<{ id: string }> }
@@ -14,46 +23,48 @@ export async function GET(
   }
 
   try {
-    const archive = await prisma.sourceRawArchive.findUnique({
+    const apiCall = await prisma.rawDartApiCall.findUnique({
       where: { id },
       include: {
-        integrityLog: true,
-        fetchJob: true,
+        payloadJson: true,
+        payloadBinary: true,
       },
     });
 
-    if (!archive) {
+    if (!apiCall) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
+    const params = parseParamsCanonical(apiCall.paramsCanonical || "");
+    const receivedAt = apiCall.completedAt || apiCall.requestedAt;
+
     return NextResponse.json({
-      id: archive.id,
-      provider: archive.provider,
-      received_at: archive.receivedAt,
-      etag: archive.etag || null,
-      raw_payload: archive.rawPayload,
-      raw_html: archive.rawHtml,
-      raw_binary_base64: archive.rawBinary
-        ? Buffer.from(archive.rawBinary).toString("base64")
-        : null,
-      integrity: archive.integrityLog
+      id: apiCall.id,
+      provider: "OPENDART",
+      received_at: receivedAt,
+      etag: null,
+      raw_payload: apiCall.payloadJson?.bodyJson || null,
+      raw_html: null,
+      raw_binary_base64: null,
+      blob_path: apiCall.payloadBinary?.blobPath || null,
+      integrity: apiCall.payloadHash
         ? {
-            sha256: archive.integrityLog.sha256,
-            hash_algo: archive.integrityLog.hashAlgo,
-            computed_at: archive.integrityLog.computedAt,
-            verifier_version: archive.integrityLog.verifierVersion,
+            sha256: apiCall.payloadHash,
+            hash_algo: "SHA-256",
+            computed_at: apiCall.completedAt,
+            verifier_version: "dart-client",
           }
         : null,
-      fetch_job: archive.fetchJob
+      fetch_job: apiCall
         ? {
-            task_id: archive.fetchJob.taskId,
-            provider: archive.fetchJob.provider,
-            endpoint: archive.fetchJob.endpoint,
-            params: archive.fetchJob.params,
-            status: archive.fetchJob.status,
-            created_at: archive.fetchJob.createdAt,
-            started_at: archive.fetchJob.startedAt,
-            finished_at: archive.fetchJob.finishedAt,
+            task_id: apiCall.jobId || apiCall.id,
+            provider: "OPENDART",
+            endpoint: apiCall.endpoint,
+            params,
+            status: apiCall.dartStatus || null,
+            created_at: apiCall.requestedAt,
+            started_at: apiCall.requestedAt,
+            finished_at: apiCall.completedAt,
           }
         : null,
     });

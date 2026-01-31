@@ -44,29 +44,8 @@ export async function GET(request: Request) {
     );
   }
 
-  const whereJobs = {
-    createdAt: {
-      gte: from,
-      lte: to,
-    },
-  } as const;
-
-  const whereDlq = {
-    createdAt: {
-      gte: from,
-      lte: to,
-    },
-  } as const;
-
-  const whereRaw = {
-    receivedAt: {
-      gte: from,
-      lte: to,
-    },
-  } as const;
-
-  const whereIntegrity = {
-    computedAt: {
+  const whereApiByRequest = {
+    requestedAt: {
       gte: from,
       lte: to,
     },
@@ -74,57 +53,55 @@ export async function GET(request: Request) {
 
   try {
     const [
-      totalJobs,
+      totalCalls,
       statusGroups,
-      providerGroups,
-      dlqCount,
-      rawCount,
+      errorCount,
+      rawJsonCount,
+      rawBinaryCount,
       integrityCount,
     ] = await prisma.$transaction([
-      prisma.fetchJob.count({ where: whereJobs }),
-      prisma.fetchJob.groupBy({
-        by: ["status"],
-        where: whereJobs,
+      prisma.rawDartApiCall.count({ where: whereApiByRequest }),
+      prisma.rawDartApiCall.groupBy({
+        by: ["dartStatus"],
+        where: whereApiByRequest,
         _count: { _all: true },
       }),
-      prisma.fetchJob.groupBy({
-        by: ["provider", "status"],
-        where: whereJobs,
-        _count: { _all: true },
+      prisma.rawDartApiCall.count({
+        where: {
+          ...whereApiByRequest,
+          OR: [
+            { dartStatus: { not: "000" } },
+            { dartStatus: null },
+            { httpStatus: { gte: 400 } },
+          ],
+        },
       }),
-      prisma.dlqRecord.count({ where: whereDlq }),
-      prisma.sourceRawArchive.count({ where: whereRaw }),
-      prisma.dataIntegrityLog.count({ where: whereIntegrity }),
+      prisma.rawDartPayloadJson.count({
+        where: { apiCall: { requestedAt: { gte: from, lte: to } } },
+      }),
+      prisma.rawDartPayloadBinary.count({
+        where: { apiCall: { requestedAt: { gte: from, lte: to } } },
+      }),
+      prisma.rawDartApiCall.count({
+        where: { ...whereApiByRequest, payloadHash: { not: null } },
+      }),
     ]);
 
     const statusCounts = statusGroups.reduce<Record<string, number>>(
       (acc, row) => {
-        acc[row.status] = row._count._all;
+        const key = row.dartStatus ?? "UNKNOWN";
+        acc[key] = row._count._all;
         return acc;
       },
       {}
     );
 
-    const providerMap = new Map<
-      string,
-      { provider: string; total: number; status: Record<string, number> }
-    >();
-
-    for (const row of providerGroups) {
-      const existing =
-        providerMap.get(row.provider) ||
-        ({ provider: row.provider, total: 0, status: {} } as const);
-
-      const count = row._count._all;
-      existing.total += count;
-      existing.status[row.status] = (existing.status[row.status] || 0) + count;
-      providerMap.set(row.provider, existing);
-    }
-
-    const success = statusCounts.SUCCESS || 0;
-    const successRate = totalJobs > 0 ? success / totalJobs : null;
+    const success = statusCounts["000"] || 0;
+    const successRate = totalCalls > 0 ? success / totalCalls : null;
     const integrityCoverage =
-      rawCount > 0 ? integrityCount / rawCount : null;
+      rawJsonCount + rawBinaryCount > 0
+        ? integrityCount / (rawJsonCount + rawBinaryCount)
+        : null;
 
     return NextResponse.json({
       range: {
@@ -132,17 +109,21 @@ export async function GET(request: Request) {
         to: to.toISOString(),
       },
       totals: {
-        jobs: totalJobs,
-        dlq: dlqCount,
-        raw_archives: rawCount,
+        jobs: totalCalls,
+        dlq: errorCount,
+        raw_archives: rawJsonCount + rawBinaryCount,
         integrity_logs: integrityCount,
         success_rate: successRate,
         integrity_coverage: integrityCoverage,
       },
       status_counts: statusCounts,
-      provider_breakdown: Array.from(providerMap.values()).sort((a, b) =>
-        a.provider.localeCompare(b.provider)
-      ),
+      provider_breakdown: [
+        {
+          provider: "OPENDART",
+          total: totalCalls,
+          status: statusCounts,
+        },
+      ],
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

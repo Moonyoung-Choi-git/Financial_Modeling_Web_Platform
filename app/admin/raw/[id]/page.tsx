@@ -8,26 +8,45 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
+function parseParamsCanonical(paramsCanonical: string) {
+  const params = new URLSearchParams(paramsCanonical);
+  const parsed: Record<string, string> = {};
+  params.forEach((value, key) => {
+    parsed[key] = value;
+  });
+  return parsed;
+}
+
 export default async function RawAuditPage({ params }: PageProps) {
   const { id } = await params;
 
   // 1. Fetch Raw Archive with Integrity Log
-  const archive = await prisma.sourceRawArchive.findUnique({
+  const apiCall = await prisma.rawDartApiCall.findUnique({
     where: { id },
     include: {
-      integrityLog: true,
-      fetchJob: true,
+      payloadJson: true,
+      payloadBinary: true,
     },
   });
 
-  if (!archive) {
+  if (!apiCall) {
     notFound();
   }
 
   // 2. Verify Integrity (Re-compute Hash)
-  const computedHash = computeHash(archive.rawPayload);
-  const storedHash = archive.integrityLog?.sha256;
-  const isIntegrityValid = computedHash === storedHash;
+  const payloadJson = apiCall.payloadJson?.bodyJson || null;
+  const storedHash = apiCall.payloadHash || apiCall.payloadBinary?.sha256 || null;
+  const computedHash = payloadJson ? computeHash(payloadJson) : null;
+  const integrityStatus =
+    storedHash && computedHash
+      ? computedHash === storedHash
+        ? "valid"
+        : "invalid"
+      : "unknown";
+
+  const receivedAt = apiCall.completedAt || apiCall.requestedAt;
+  const paramsCanonical = apiCall.paramsCanonical || "";
+  const parsedParams = paramsCanonical ? parseParamsCanonical(paramsCanonical) : null;
 
   return (
     <div className="min-h-screen bg-background p-8">
@@ -47,20 +66,52 @@ export default async function RawAuditPage({ params }: PageProps) {
         </div>
 
         {/* Integrity Status Card */}
-        <div className={`rounded-lg border p-6 ${isIntegrityValid ? 'bg-green-500/5 border-green-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
+        <div
+          className={`rounded-lg border p-6 ${
+            integrityStatus === "valid"
+              ? "bg-green-500/5 border-green-500/20"
+              : integrityStatus === "invalid"
+                ? "bg-red-500/5 border-red-500/20"
+                : "bg-muted/40 border-border"
+          }`}
+        >
           <div className="flex items-start justify-between">
             <div className="space-y-1">
-              <h3 className={`text-lg font-semibold flex items-center gap-2 ${isIntegrityValid ? 'text-green-600' : 'text-red-600'}`}>
-                {isIntegrityValid ? <CheckCircle2 className="w-5 h-5" /> : <XCircle className="w-5 h-5" />}
-                {isIntegrityValid ? 'Integrity Verified' : 'Integrity Compromised'}
+              <h3
+                className={`text-lg font-semibold flex items-center gap-2 ${
+                  integrityStatus === "valid"
+                    ? "text-green-600"
+                    : integrityStatus === "invalid"
+                      ? "text-red-600"
+                      : "text-muted-foreground"
+                }`}
+              >
+                {integrityStatus === "valid" ? (
+                  <CheckCircle2 className="w-5 h-5" />
+                ) : integrityStatus === "invalid" ? (
+                  <XCircle className="w-5 h-5" />
+                ) : (
+                  <Shield className="w-5 h-5" />
+                )}
+                {integrityStatus === "valid"
+                  ? "Integrity Verified"
+                  : integrityStatus === "invalid"
+                    ? "Integrity Compromised"
+                    : "Integrity Unknown"}
               </h3>
               <p className="text-sm text-muted-foreground">
-                The SHA-256 hash of the stored payload matches the immutable audit log.
+                {storedHash && computedHash
+                  ? "The SHA-256 hash of the stored payload matches the ledger."
+                  : "No stored hash is available for comparison."}
               </p>
             </div>
             <div className="text-right text-xs font-mono text-muted-foreground space-y-1">
-              <div>Stored: {storedHash?.substring(0, 16)}...</div>
-              <div>Actual: {computedHash.substring(0, 16)}...</div>
+              <div>
+                Stored: {storedHash ? `${storedHash.substring(0, 16)}...` : "—"}
+              </div>
+              <div>
+                Actual: {computedHash ? `${computedHash.substring(0, 16)}...` : "—"}
+              </div>
             </div>
           </div>
         </div>
@@ -75,19 +126,19 @@ export default async function RawAuditPage({ params }: PageProps) {
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">Provider</dt>
-                <dd className="font-medium">{archive.provider}</dd>
+                <dd className="font-medium">OPENDART</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">Received At</dt>
-                <dd className="font-medium">{new Date(archive.receivedAt).toLocaleString()}</dd>
+                <dd className="font-medium">{receivedAt.toLocaleString()}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">Task ID</dt>
-                <dd className="font-mono text-xs">{archive.taskId}</dd>
+                <dd className="font-mono text-xs">{apiCall.jobId || apiCall.id}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-muted-foreground">ETag</dt>
-                <dd className="font-mono text-xs">{archive.etag || 'N/A'}</dd>
+                <dt className="text-muted-foreground">Endpoint</dt>
+                <dd className="font-mono text-xs">{apiCall.endpoint}</dd>
               </div>
             </dl>
           </div>
@@ -95,7 +146,9 @@ export default async function RawAuditPage({ params }: PageProps) {
           <div className="rounded-lg border bg-card p-6 shadow-sm">
             <h3 className="font-semibold mb-4">Request Parameters</h3>
             <pre className="text-xs bg-muted p-4 rounded-md overflow-auto max-h-[140px]">
-              {JSON.stringify(archive.fetchJob?.params, null, 2)}
+              {parsedParams
+                ? JSON.stringify(parsedParams, null, 2)
+                : paramsCanonical || "—"}
             </pre>
           </div>
         </div>
@@ -108,7 +161,11 @@ export default async function RawAuditPage({ params }: PageProps) {
           </div>
           <div className="p-0">
             <pre className="text-xs p-4 overflow-auto max-h-[600px] font-mono">
-              {JSON.stringify(archive.rawPayload, null, 2)}
+              {payloadJson
+                ? JSON.stringify(payloadJson, null, 2)
+                : apiCall.payloadBinary?.blobPath
+                  ? `Binary payload stored at: ${apiCall.payloadBinary.blobPath}`
+                  : "No JSON payload recorded."}
             </pre>
           </div>
         </div>

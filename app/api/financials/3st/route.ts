@@ -19,22 +19,36 @@ export async function GET(request: Request) {
     const fiscalYear = parseInt(year, 10);
 
     // 1. DB에서 계정 데이터 조회
-    const accounts = await prisma.financialAccount.findMany({
+    const facts = await prisma.curatedFinFact.findMany({
       where: {
-        ticker: ticker,
+        stockCode: ticker,
         fiscalYear: fiscalYear,
       },
+      include: {
+        standardCoa: true,
+      },
       orderBy: {
-        standardAccountCode: 'asc',
+        standardLineId: 'asc',
       },
     });
 
     // 2. 데이터가 없는 경우 처리
-    if (accounts.length === 0) {
+    if (facts.length === 0) {
       // 원본 데이터(Raw Data)가 있는지 확인
-      const rawExists = await prisma.sourceRawMetaIndex.findFirst({
-        where: { ticker, fiscalYear },
+      const corp = await prisma.rawDartCorpMaster.findFirst({
+        where: { stockCode: ticker },
+        select: { corpCode: true },
       });
+
+      const rawExists = corp
+        ? await prisma.rawDartFnlttAllRow.findFirst({
+            where: {
+              corpCode: corp.corpCode,
+              bsnsYear: fiscalYear.toString(),
+            },
+            select: { id: true },
+          })
+        : null;
 
       if (!rawExists) {
         return NextResponse.json(
@@ -46,9 +60,9 @@ export async function GET(request: Request) {
 
     // 3. 3-Statement 형태로 변환
     const response = {
-      IS: accounts.filter((a) => a.statementType === 'IS').map(formatAccount),
-      BS: accounts.filter((a) => a.statementType === 'BS').map(formatAccount),
-      CF: accounts.filter((a) => a.statementType === 'CF').map(formatAccount),
+      IS: facts.filter((a) => a.statementType === 'IS').map(formatFact),
+      BS: facts.filter((a) => a.statementType === 'BS').map(formatFact),
+      CF: facts.filter((a) => a.statementType === 'CF').map(formatFact),
     };
 
     return NextResponse.json(response);
@@ -61,14 +75,21 @@ export async function GET(request: Request) {
   }
 }
 
-function formatAccount(account: any) {
+function formatFact(fact: any) {
+  const standardCode =
+    fact.standardLineId || fact.accountSourceId || fact.accountNameKr;
+  const standardName =
+    fact.standardCoa?.displayNameEn ||
+    fact.standardCoa?.displayNameKr ||
+    fact.accountNameKr;
+
   return {
-    id: account.id,
-    standardAccountCode: account.standardAccountCode,
-    standardAccountName: account.standardAccountName,
-    reportedAccountName: account.reportedAccountName,
-    value: account.value.toString(),
-    unit: account.unit,
-    statementType: account.statementType,
+    id: fact.id,
+    standardAccountCode: standardCode,
+    standardAccountName: standardName,
+    reportedAccountName: fact.accountNameKr,
+    value: fact.amount.toString(),
+    unit: fact.currency,
+    statementType: fact.statementType,
   };
 }

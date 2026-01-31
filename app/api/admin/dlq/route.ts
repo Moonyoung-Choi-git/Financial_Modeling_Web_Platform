@@ -61,23 +61,26 @@ export async function GET(request: Request) {
   const offset = Math.max(Number.parseInt(offsetParam || "0", 10) || 0, 0);
 
   const where: any = {
-    createdAt: {
+    requestedAt: {
       gte: from,
       lte: to,
     },
   };
 
   if (provider) {
-    where.rawArchive = { is: { provider } };
+    const normalized = provider.toUpperCase();
+    if (normalized !== "OPENDART" && normalized !== "DART") {
+      return NextResponse.json({ items: [], meta: { total: 0, limit, offset } });
+    }
   }
 
   if (status) {
     if (status === "retry_due") {
-      where.nextRetryAt = { lte: now };
+      return NextResponse.json({ items: [], meta: { total: 0, limit, offset } });
     } else if (status === "retry_scheduled") {
-      where.nextRetryAt = { gt: now };
+      return NextResponse.json({ items: [], meta: { total: 0, limit, offset } });
     } else if (status === "no_retry") {
-      where.nextRetryAt = null;
+      // All records are treated as no-retry for legacy DLQ view.
     } else {
       return NextResponse.json(
         { error: "Invalid status" },
@@ -88,31 +91,52 @@ export async function GET(request: Request) {
 
   try {
     const [total, records] = await prisma.$transaction([
-      prisma.dlqRecord.count({ where }),
-      prisma.dlqRecord.findMany({
-        where,
-        include: {
-          rawArchive: true,
+      prisma.rawDartApiCall.count({
+        where: {
+          ...where,
+          OR: [
+            { dartStatus: { not: "000" } },
+            { dartStatus: null },
+            { httpStatus: { gte: 400 } },
+          ],
         },
-        orderBy: { createdAt: "desc" },
+      }),
+      prisma.rawDartApiCall.findMany({
+        where: {
+          ...where,
+          OR: [
+            { dartStatus: { not: "000" } },
+            { dartStatus: null },
+            { httpStatus: { gte: 400 } },
+          ],
+        },
+        orderBy: { requestedAt: "desc" },
         skip: offset,
         take: limit,
       }),
     ]);
 
-    const items = records.map((record) => ({
-      id: record.id,
-      task_id: record.taskId,
-      raw_archive_id: record.rawArchiveId,
-      provider: record.rawArchive?.provider || null,
-      error_type: record.errorType,
-      error_message: record.errorMessage,
-      stack_trace: record.stackTrace,
-      retry_count: record.retryCount,
-      next_retry_at: record.nextRetryAt,
-      created_at: record.createdAt,
-      status: deriveStatus(record.nextRetryAt),
-    }));
+    const items = records.map((record) => {
+      const errorType =
+        record.dartStatus || (record.httpStatus ? `HTTP_${record.httpStatus}` : "UNKNOWN");
+      const errorMessage =
+        record.dartMessage ||
+        (record.httpStatus ? `HTTP ${record.httpStatus}` : "Unknown error");
+
+      return {
+        id: record.id,
+        task_id: record.jobId || record.id,
+        raw_archive_id: record.id,
+        provider: "OPENDART",
+        error_type: errorType,
+        error_message: errorMessage,
+        stack_trace: null,
+        retry_count: record.retryCount || 0,
+        next_retry_at: null,
+        created_at: record.requestedAt,
+        status: deriveStatus(null),
+      };
+    });
 
     return NextResponse.json({
       items,
